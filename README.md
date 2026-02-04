@@ -1,7 +1,7 @@
 # redes-sistemas-virtualizadas
 Laboratorio de red virtualizada con tres nodos (Linux Server, Windows Server y cliente Windows), configurado con NAT y LAN Segment para pruebas de conectividad y diagnóstico inicial.
 
-## topologia
+## Topologia
 - Servidor Linux (Mageia – CLI)
 - Servidor Windows Server 2022
 - Cliente Windows 10 Pro
