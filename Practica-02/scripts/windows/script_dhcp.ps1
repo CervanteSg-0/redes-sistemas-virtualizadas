@@ -58,14 +58,14 @@ function Ensure-DhcpRole {
 function Configure-Dhcp {
   Import-Module DhcpServer
 
-  $scopeName = Read-Host "Nombre descriptivo del ámbito [Scope-Sistemas]"
+  $scopeName = Read-Host "Nombre descriptivo del ambito [Scope-Sistemas]"
   if ([string]::IsNullOrWhiteSpace($scopeName)) { $scopeName = "Scope-Sistemas" }
 
-  $mask   = ReadMask "Máscara (/24 para esta práctica)" "255.255.255.0"
+  $mask   = ReadMask "Mascara (/24 para esta práctica)" "255.255.255.0"
   $start  = ReadIPv4 "Rango inicial" "192.168.100.50"
   $end    = ReadIPv4 "Rango final"   "192.168.100.150"
 
-  # Validación: pertenecer a 192.168.100.0/24
+  # Validacion: pertenecer a 192.168.100.0/24
   if (-not (SameSubnet $start "192.168.100.0" $mask)) { throw "StartRange $start NO pertenece a 192.168.100.0/24" }
   if (-not (SameSubnet $end   "192.168.100.0" $mask)) { throw "EndRange $end NO pertenece a 192.168.100.0/24" }
 
@@ -76,9 +76,9 @@ function Configure-Dhcp {
 
   $dns     = ReadIPv4 "DNS" "192.168.100.20"
 
-  $leaseDays = Read-Host "Lease en días [8]"
+  $leaseDays = Read-Host "Lease en dias [8]"
   if ([string]::IsNullOrWhiteSpace($leaseDays)) { $leaseDays = "8" }
-  if ($leaseDays -notmatch '^\d+$') { throw "Lease debe ser entero (días)." }
+  if ($leaseDays -notmatch '^\d+$') { throw "Lease debe ser entero (dias)." }
   $lease = New-TimeSpan -Days ([int]$leaseDays)
 
   $scopeId = "192.168.100.0"
@@ -138,6 +138,6 @@ while ($true) {
     "3" { Monitor-Dhcp }
     "4" { Restart-Dhcp }
     "5" { break }
-    default { Write-Host "Opción inválida." }
+    default { Write-Host "Opcion invalida." }
   }
 }
