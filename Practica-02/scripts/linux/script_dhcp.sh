@@ -60,9 +60,27 @@ read_ipv4() {
       read -r -p "$prompt: " v
     fi
     if is_ipv4 "$v"; then echo "$v"; return 0; fi
-    echo "IP inválida. Ejemplo válido: 192.168.100.10 (no 1000, no 0.0.0.0)."
+    echo "IP inválida. Ejemplo valido: 192.168.100.10 (no 1000, no 0.0.0.0)."
   done
 }
+
+read_ipv4_optional() {
+  local prompt="$1" def="${2:-}" v
+  while true; do
+    if [[ -n "$def" ]]; then
+      read -r -p "$prompt [$def] (ENTER=usar, -=omitir): " v
+      [[ -z "$v" ]] && v="$def"
+      [[ "$v" == "-" ]] && echo "" && return 0
+    else
+      read -r -p "$prompt (ENTER o -=omitir): " v
+      [[ -z "$v" || "$v" == "-" ]] && echo "" && return 0
+    fi
+
+    if is_ipv4 "$v"; then echo "$v"; return 0; fi
+    echo "IP inválida. Ejemplo: 192.168.100.1"
+  done
+}
+
 
 read_mask() {
   local prompt="$1" def="${2:-}"
