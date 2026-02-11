@@ -32,7 +32,7 @@ function ReadIPv4([string]$prompt, [string]$def) {
     $v = Read-Host "$prompt [$def]"
     if ([string]::IsNullOrWhiteSpace($v)) { $v = $def }
     if (IsIPv4 $v) { return $v }
-    Write-Host "IP inválida (ej: 192.168.100.10). No se acepta '1000'." -ForegroundColor Yellow
+    Write-Host "IP invalida (ej: 192.168.100.10). No se acepta '1000'." -ForegroundColor Yellow
   }
 }
 
@@ -41,7 +41,7 @@ function ReadMask([string]$prompt, [string]$def) {
     $v = Read-Host "$prompt [$def]"
     if ([string]::IsNullOrWhiteSpace($v)) { $v = $def }
     if (MaskIsValid $v) { return $v }
-    Write-Host "Máscara inválida (ej: 255.255.255.0)" -ForegroundColor Yellow
+    Write-Host "Máscara invalida (ej: 255.255.255.0)" -ForegroundColor Yellow
   }
 }
 
@@ -58,7 +58,7 @@ function Ensure-DhcpRole {
 function Configure-Dhcp {
   Import-Module DhcpServer
 
-  $scopeName = Read-Host "Nombre descriptivo del ámbito [Scope-Sistemas]"
+  $scopeName = Read-Host "Nombre descriptivo del ambito [Scope-Sistemas]"
   if ([string]::IsNullOrWhiteSpace($scopeName)) { $scopeName = "Scope-Sistemas" }
 
   $mask   = ReadMask "Máscara (/24 para esta práctica)" "255.255.255.0"
