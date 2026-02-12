@@ -23,24 +23,18 @@ es_ipv4_formato() {
   return 0
 }
 
-# Rechaza rangos no congruentes: 0.0.0.0, 255.255.255.255, loopback, link-local, multicast, etc.
+# Rechaza: 0.0.0.0, 255.255.255.255, loopback 127/8, link-local 169.254/16, multicast 224/4, reservado 240/4
 es_ipv4_valida() {
   local ip="$1"
   es_ipv4_formato "$ip" || return 1
-
   [[ "$ip" != "0.0.0.0" && "$ip" != "255.255.255.255" ]] || return 1
 
   local n
   n="$(ip_a_entero "$ip")" || return 1
-
-  # 127.0.0.0/8 (loopback)
   (( (n & 0xFF000000) != 0x7F000000 )) || return 1
-  # 169.254.0.0/16 (link-local)
   (( (n & 0xFFFF0000) != 0xA9FE0000 )) || return 1
-  # 224.0.0.0/4 (multicast) y 240.0.0.0/4 (reservado)
   (( (n & 0xF0000000) != 0xE0000000 )) || return 1
   (( (n & 0xF0000000) != 0xF0000000 )) || return 1
-
   return 0
 }
 
@@ -87,6 +81,27 @@ incrementar_ip() {
   entero_a_ip $(( i + 1 ))
 }
 
+prefijo_desde_mascara() {
+  local mask="$1" o1 o2 o3 o4
+  IFS=. read -r o1 o2 o3 o4 <<<"$mask"
+  local count=0 o
+  for o in "$o1" "$o2" "$o3" "$o4"; do
+    case "$o" in
+      255) count=$((count+8));;
+      254) count=$((count+7));;
+      252) count=$((count+6));;
+      248) count=$((count+5));;
+      240) count=$((count+4));;
+      224) count=$((count+3));;
+      192) count=$((count+2));;
+      128) count=$((count+1));;
+      0) count=$((count+0));;
+      *) echo 24; return 0;;
+    esac
+  done
+  echo "$count"
+}
+
 leer_ipv4() {
   local prompt="$1" def="${2:-}" v
   while true; do
@@ -97,11 +112,26 @@ leer_ipv4() {
       read -r -p "$prompt: " v
     fi
     if es_ipv4_valida "$v"; then echo "$v"; return 0; fi
-    echo "IP invalida. Ejemplo: 192.168.1.10"
+    echo "IP invalida."
   done
 }
 
-# Permite final "corto": 115 => X.Y.Z.115 segun inicio
+leer_ipv4_opcional() {
+  local prompt="$1" def="${2:-}" v
+  while true; do
+    if [[ -n "$def" ]]; then
+      read -r -p "$prompt [$def] (ENTER=usar, -=omitir): " v
+      [[ -z "$v" ]] && v="$def"
+      [[ "$v" == "-" ]] && echo "" && return 0
+    else
+      read -r -p "$prompt (ENTER o -=omitir): " v
+      [[ -z "$v" || "$v" == "-" ]] && echo "" && return 0
+    fi
+    if es_ipv4_valida "$v"; then echo "$v"; return 0; fi
+    echo "IP invalida."
+  done
+}
+
 leer_ipv4_final_con_shorthand() {
   local prompt="$1" ip_inicio="$2" def="${3:-}" v
   local a b c _
@@ -121,37 +151,17 @@ leer_ipv4_final_con_shorthand() {
     fi
 
     if es_ipv4_valida "$v"; then echo "$v"; return 0; fi
-    echo "IP invalida. Ejemplo: 192.168.1.115 o solo 115"
-  done
-}
-
-leer_ipv4_opcional() {
-  local prompt="$1" def="${2:-}" v
-  while true; do
-    if [[ -n "$def" ]]; then
-      read -r -p "$prompt [$def] (ENTER=usar, -=omitir): " v
-      [[ -z "$v" ]] && v="$def"
-      [[ "$v" == "-" ]] && echo "" && return 0
-    else
-      read -r -p "$prompt (ENTER o -=omitir): " v
-      [[ -z "$v" || "$v" == "-" ]] && echo "" && return 0
-    fi
-
-    if es_ipv4_valida "$v"; then echo "$v"; return 0; fi
-    echo "IP invalida. Ejemplo: 192.168.1.1"
+    echo "IP invalida."
   done
 }
 
 leer_mascara() {
-  local prompt="$1" def="${2:-}" v
+  local prompt="$1" def="${2:-255.255.255.0}" v
   while true; do
-    if [[ -n "$def" ]]; then
-      read -r -p "$prompt [$def]: " v
-      v="${v:-$def}"
-    else
-      read -r -p "$prompt: " v
-    fi
+    read -r -p "$prompt [$def]: " v
+    v="${v:-$def}"
     if mascara_es_valida "$v"; then echo "$v"; return 0; fi
-    echo "Mascara invalida. Ejemplo: 255.255.255.0"
+    echo "Mascara invalida."
   done
 }
+

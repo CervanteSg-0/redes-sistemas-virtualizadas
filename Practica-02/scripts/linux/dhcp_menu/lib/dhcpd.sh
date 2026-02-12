@@ -17,7 +17,7 @@ archivo_leases() {
 
 reiniciar_servicio_dhcpd() {
   systemctl enable --now dhcpd >/dev/null 2>&1 || true
-  systemctl restart dhcpd || error "No pude reiniciar dhcpd. Revisa: journalctl -u dhcpd -n 50 --no-pager"
+  systemctl restart dhcpd || error "No pude reiniciar dhcpd. Revisa: journalctl -xeu dhcpd --no-pager | tail -n 80"
 }
 
 estado_servicio_dhcpd() {
@@ -25,7 +25,7 @@ estado_servicio_dhcpd() {
   systemctl --no-pager -l status dhcpd || true
   echo
   echo "== Ultimos logs (dhcpd) =="
-  journalctl -u dhcpd -n 40 --no-pager || true
+  journalctl -u dhcpd -n 50 --no-pager || true
 }
 
 leases_activas() {
@@ -40,9 +40,7 @@ leases_activas() {
     inlease && $1=="hardware" && $2=="ethernet" {mac=$3; gsub(";","",mac)}
     inlease && $1=="client-hostname" {host=$2; gsub(/[";]/,"",host)}
     inlease && $1=="}" {
-      if (state=="active") {
-        printf "%-15s  %-17s  %s\n", ip, mac, host
-      }
+      if (state=="active") printf "%-15s  %-17s  %s\n", ip, mac, host
       inlease=0
     }
   ' "$lf" | sort -V
@@ -52,48 +50,96 @@ mostrar_interfaces() {
   ip -o link show | awk -F': ' '{print $2}' | sed 's/@.*//' | grep -v '^lo$' || true
 }
 
-aplicar_ip_estatica_servidor() {
+tiene_ipv4_en_interfaz() {
+  local iface="$1"
+  ip -4 addr show dev "$iface" | grep -q "inet "
+}
+
+poner_ip_temporal_si_falta() {
+  local iface="$1" ip_tmp="$2" mask="$3"
+  local pref
+  pref="$(prefijo_desde_mascara "$mask")"
+  ip link set "$iface" up >/dev/null 2>&1 || true
+
+  if ! tiene_ipv4_en_interfaz "$iface"; then
+    echo "Asignando IP temporal $ip_tmp/$pref a $iface ..."
+    ip addr add "$ip_tmp/$pref" dev "$iface" >/dev/null 2>&1 || true
+  fi
+}
+
+# Mageia: systemd usa $INTERFACES desde /etc/sysconfig/dhcpd
+escribir_sysconfig_mageia() {
+  local iface="$1" leasefile="$2"
+  mkdir -p /etc/sysconfig || true
+  cat >/etc/sysconfig/dhcpd <<EOF
+INTERFACES="${iface}"
+OPTIONS=""
+CONFIGFILE="${CONF}"
+LEASEFILE="${leasefile}"
+EOF
+}
+
+# Asegura que dhcpd.conf siempre tenga subnet valido (evita error por conf vacio)
+escribir_conf_base() {
+  local red="$1" mask="$2"
+  if [[ -f "$CONF" ]]; then
+    cp -a "$CONF" "${CONF}.bak.$(date +%F_%H%M%S)" >/dev/null 2>&1 || true
+  fi
+  cat >"$CONF" <<EOF
+authoritative;
+ddns-update-style none;
+
+default-lease-time 600;
+max-lease-time 600;
+
+subnet ${red} netmask ${mask} {
+}
+EOF
+}
+
+# NetworkManager: modifica la conexion que corresponde a ens34 (no deja IP vieja pegada)
+aplicar_ip_estatica_nmcli() {
   local iface="$1" ip_srv="$2" mask="$3" gw="$4" dns1="$5" dns2="$6"
 
-  # Intento con NetworkManager (nmcli)
-  if command -v nmcli >/dev/null 2>&1; then
-    local con
-    con="$(nmcli -t -f NAME,DEVICE con show --active 2>/dev/null | awk -F: -v d="$iface" '$2==d{print $1; exit}')"
-    if [[ -z "$con" ]]; then
-      con="$(nmcli -t -f NAME,DEVICE con show 2>/dev/null | awk -F: -v d="$iface" '$2==d{print $1; exit}')"
-    fi
-    if [[ -n "$con" ]]; then
-      echo "Aplicando IP estatica via nmcli en $iface (conexion: $con)..."
-      nmcli con mod "$con" ipv4.method manual || true
-      nmcli con mod "$con" ipv4.addresses "${ip_srv}/$(prefijo_desde_mascara "$mask")" || true
+  command -v nmcli >/dev/null 2>&1 || return 1
 
-      if [[ -n "$gw" ]]; then
-        nmcli con mod "$con" ipv4.gateway "$gw" || true
-      else
-        nmcli con mod "$con" ipv4.gateway "" || true
-      fi
+  local con pref dnsline
+  con="$(nmcli -t -f NAME,DEVICE con show --active 2>/dev/null | awk -F: -v d="$iface" '$2==d{print $1; exit}')"
+  [[ -z "$con" ]] && con="$(nmcli -t -f NAME,DEVICE con show 2>/dev/null | awk -F: -v d="$iface" '$2==d{print $1; exit}')"
+  [[ -z "$con" ]] && return 1
 
-      # DNS: nmcli acepta lista separada por espacio/coma segun version; usamos espacio.
-      if [[ -n "$dns1" && -n "$dns2" ]]; then
-        nmcli con mod "$con" ipv4.dns "$dns1 $dns2" || true
-      elif [[ -n "$dns1" ]]; then
-        nmcli con mod "$con" ipv4.dns "$dns1" || true
-      else
-        nmcli con mod "$con" ipv4.dns "" || true
-      fi
+  pref="$(prefijo_desde_mascara "$mask")"
 
-      nmcli con up "$con" >/dev/null 2>&1 || true
-      return 0
-    fi
+  nmcli con mod "$con" ipv4.method manual
+  nmcli con mod "$con" ipv4.addresses "${ip_srv}/${pref}"
+
+  if [[ -n "$gw" ]]; then
+    nmcli con mod "$con" ipv4.gateway "$gw"
+  else
+    nmcli con mod "$con" ipv4.gateway ""
   fi
 
-  # Fallback: ifcfg (Mageia/RHEL-like)
-  local ifcfg_dir="/etc/sysconfig/network-scripts"
-  local ifcfg_file="${ifcfg_dir}/ifcfg-${iface}"
-  mkdir -p "$ifcfg_dir" || true
-  [[ -f "$ifcfg_file" ]] && cp -a "$ifcfg_file" "${ifcfg_file}.bak.$(date +%F_%H%M%S)" || true
+  dnsline=""
+  if [[ -n "$dns1" && -n "$dns2" ]]; then
+    dnsline="${dns1} ${dns2}"
+  elif [[ -n "$dns1" ]]; then
+    dnsline="${dns1}"
+  fi
+  nmcli con mod "$con" ipv4.dns "$dnsline"
 
-  echo "Aplicando IP estatica via ifcfg en $iface ($ifcfg_file)..."
+  nmcli con down "$con" >/dev/null 2>&1 || true
+  nmcli con up "$con" >/dev/null 2>&1 || true
+  return 0
+}
+
+# Fallback ifcfg (si nmcli falla)
+aplicar_ip_estatica_ifcfg() {
+  local iface="$1" ip_srv="$2" mask="$3" gw="$4" dns1="$5" dns2="$6"
+  local dir="/etc/sysconfig/network-scripts"
+  local file="${dir}/ifcfg-${iface}"
+  mkdir -p "$dir" || true
+  [[ -f "$file" ]] && cp -a "$file" "${file}.bak.$(date +%F_%H%M%S)" >/dev/null 2>&1 || true
+
   {
     echo "DEVICE=${iface}"
     echo "ONBOOT=yes"
@@ -103,98 +149,82 @@ aplicar_ip_estatica_servidor() {
     [[ -n "$gw" ]] && echo "GATEWAY=${gw}"
     [[ -n "$dns1" ]] && echo "DNS1=${dns1}"
     [[ -n "$dns2" ]] && echo "DNS2=${dns2}"
-  } > "$ifcfg_file"
+  } >"$file"
 
   systemctl restart NetworkManager >/dev/null 2>&1 || true
   systemctl restart network >/dev/null 2>&1 || true
 }
 
-# Convierte mascara a prefijo (/24) para nmcli
-prefijo_desde_mascara() {
-  local mask="$1" o1 o2 o3 o4
-  IFS=. read -r o1 o2 o3 o4 <<<"$mask"
-  local bin count=0
-  for o in "$o1" "$o2" "$o3" "$o4"; do
-    bin=$(printf "%08d" "$(echo "obase=2;$o" | bc 2>/dev/null)" 2>/dev/null)
-    count=$(( count + ${bin//0/} ))
-  done
-  # fallback simple si bc falla
-  if [[ -z "$count" || "$count" -le 0 ]]; then
-    case "$mask" in
-      255.255.255.0) echo 24 ;;
-      255.255.0.0) echo 16 ;;
-      255.0.0.0) echo 8 ;;
-      *) echo 24 ;;
-    esac
-  else
-    echo "$count"
+aplicar_ip_estatica_servidor() {
+  local iface="$1" ip_srv="$2" mask="$3" gw="$4" dns1="$5" dns2="$6"
+  echo "Aplicando IP estatica en $iface: $ip_srv/$mask"
+  if ! aplicar_ip_estatica_nmcli "$iface" "$ip_srv" "$mask" "$gw" "$dns1" "$dns2"; then
+    aplicar_ip_estatica_ifcfg "$iface" "$ip_srv" "$mask" "$gw" "$dns1" "$dns2"
   fi
 }
 
 configurar_dhcp_interactivo() {
-  local nombre_ambito ip_inicio ip_final mask
-  local ip_servidor ip_pool_inicio
+  local nombre ip_inicio ip_final mask iface lease_sec
+  local ip_srv ip_pool_inicio
   local gw dns1 dns2
-  local lease_sec iface
   local red broadcast
-  local si ei psi pei
+  local si ei psi
+  local lf
 
-  read -r -p "Nombre descriptivo del ambito [Scope-1]: " nombre_ambito
-  nombre_ambito="${nombre_ambito:-Scope-1}"
-  nombre_ambito="$(echo "$nombre_ambito" | tr -d '"')"
+  read -r -p "Nombre descriptivo del ambito [Scope-1]: " nombre
+  nombre="${nombre:-Scope-1}"
+  nombre="$(echo "$nombre" | tr -d '"')"
 
+  echo "Interfaces disponibles:"
+  mostrar_interfaces | sed 's/^/ - /'
+  read -r -p "Interfaz de red interna [ens34]: " iface
+  iface="${iface:-ens34}"
+
+  # IP inicial = IP estatica del servidor
   ip_inicio="$(leer_ipv4 "Rango inicial (se usa como IP fija del servidor)")"
   mask="$(leer_mascara "Mascara" "255.255.255.0")"
-
   ip_final="$(leer_ipv4_final_con_shorthand "Rango final" "$ip_inicio")"
 
-  # Validar misma subred y orden
-  misma_subred "$ip_inicio" "$ip_final" "$mask" || error "Inicio y final no estan en la misma subred segun mascara $mask"
-
+  misma_subred "$ip_inicio" "$ip_final" "$mask" || error "Inicio y final no estan en la misma subred"
   si="$(ip_a_entero "$ip_inicio")"
   ei="$(ip_a_entero "$ip_final")"
   (( si < ei )) || error "El rango inicial debe ser menor que el rango final"
 
-  ip_servidor="$ip_inicio"
+  ip_srv="$ip_inicio"
   ip_pool_inicio="$(incrementar_ip "$ip_inicio")"
-
   psi="$(ip_a_entero "$ip_pool_inicio")"
-  (( psi <= ei )) || error "El pool quedo invalido: (inicio+1) es mayor que final"
-
-  red="$(red_de_ip "$ip_inicio" "$mask")" || error "No pude calcular red"
-  broadcast="$(broadcast_de_red "$red" "$mask")" || error "No pude calcular broadcast"
+  (( psi <= ei )) || error "Pool invalido: (inicio+1) es mayor que final"
 
   # Gateway opcional
   gw="$(leer_ipv4_opcional "Puerta de enlace (opcional)" "")"
-  if [[ -n "$gw" ]]; then
-    misma_subred "$gw" "$ip_inicio" "$mask" || error "Gateway no pertenece a la subred"
-  fi
+  [[ -n "$gw" ]] && misma_subred "$gw" "$ip_inicio" "$mask" || { [[ -n "$gw" ]] && error "Gateway fuera de subred"; }
 
-  # DNS primario opcional; si se omite, no preguntar secundario
+  # DNS primario opcional; si se omite, no se pregunta secundario
   dns1="$(leer_ipv4_opcional "DNS primario (opcional)" "")"
   dns2=""
   if [[ -n "$dns1" ]]; then
     dns2="$(leer_ipv4_opcional "DNS secundario (opcional)" "")"
   fi
 
-  # Lease en segundos
   read -r -p "Lease time en segundos [86400]: " lease_sec
   lease_sec="${lease_sec:-86400}"
   [[ "$lease_sec" =~ ^[0-9]+$ ]] || error "Lease debe ser numero entero (segundos)"
-  (( lease_sec >= 60 && lease_sec <= 31536000 )) || error "Lease fuera de rango razonable (60..31536000)"
+  (( lease_sec >= 60 && lease_sec <= 31536000 )) || error "Lease fuera de rango (60..31536000)"
 
-  echo "Interfaces disponibles:"
-  mostrar_interfaces | sed 's/^/ - /'
-  read -r -p "Interfaz de la red interna [eth0]: " iface
-  iface="${iface:-eth0}"
+  red="$(red_de_ip "$ip_inicio" "$mask")" || error "No pude calcular red"
+  broadcast="$(broadcast_de_red "$red" "$mask")" || error "No pude calcular broadcast"
 
-  # Backup conf
-  if [[ -f "$CONF" ]]; then
-    cp -a "$CONF" "${CONF}.bak.$(date +%F_%H%M%S)" || true
-  fi
+  # Asegurar IP temporal si la interfaz estaba sin IP (evita fallas raras)
+  poner_ip_temporal_si_falta "$iface" "$(incrementar_ip "$red")" "$mask"
 
-  echo "Aplicando IP estatica al servidor: $ip_servidor / $mask en $iface"
-  aplicar_ip_estatica_servidor "$iface" "$ip_servidor" "$mask" "$gw" "$dns1" "$dns2"
+  # Aplicar IP estatica definitiva del server en ens34 (NM)
+  aplicar_ip_estatica_servidor "$iface" "$ip_srv" "$mask" "$gw" "$dns1" "$dns2"
+
+  # Lease file + sysconfig (Mageia INTERFACES)
+  lf="$(archivo_leases)"
+  mkdir -p "$(dirname "$lf")" || true
+  touch "$lf" || true
+  escribir_sysconfig_mageia "$iface" "$lf"
 
   # Construir opciones solo si existen
   local opt_routers="" opt_dns=""
@@ -203,6 +233,11 @@ configurar_dhcp_interactivo() {
     opt_dns="option domain-name-servers ${dns1}, ${dns2};"
   elif [[ -n "$dns1" ]]; then
     opt_dns="option domain-name-servers ${dns1};"
+  fi
+
+  # Escribir conf definitivo: range = (inicio+1) .. final
+  if [[ -f "$CONF" ]]; then
+    cp -a "$CONF" "${CONF}.bak.$(date +%F_%H%M%S)" >/dev/null 2>&1 || true
   fi
 
   cat >"$CONF" <<EOF
@@ -222,33 +257,15 @@ subnet ${red} netmask ${mask} {
 }
 EOF
 
-  # Lease file
-  local lf
-  lf="$(archivo_leases)"
-  mkdir -p "$(dirname "$lf")" || true
-  touch "$lf" || true
-
-  # Limitar interfaz (sysconfig)
-  mkdir -p /etc/sysconfig || true
-  cat >/etc/sysconfig/dhcpd <<EOF
-DHCPD_INTERFACE="${iface}"
-DHCPDARGS="${iface}"
-EOF
-
   echo "Validando sintaxis..."
-  dhcpd -t -cf "$CONF" || error "Error en la configuracion. Corrige $CONF"
-
-  # Firewall si existe firewalld
-  if command -v firewall-cmd >/dev/null 2>&1; then
-    firewall-cmd --permanent --add-service=dhcp >/dev/null 2>&1 || true
-    firewall-cmd --reload >/dev/null 2>&1 || true
-  fi
+  dhcpd -t -cf "$CONF" || error "Error en la configuracion. Revisa $CONF"
 
   echo "Reiniciando dhcpd..."
   reiniciar_servicio_dhcpd
 
   echo "Listo."
-  echo "IP fija del servidor: ${ip_servidor}"
+  echo "IP fija servidor: ${ip_srv}/${mask} en ${iface}"
   echo "Pool DHCP: ${ip_pool_inicio} - ${ip_final}"
   echo "Config: $CONF"
 }
+
