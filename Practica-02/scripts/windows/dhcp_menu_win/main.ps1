@@ -2,6 +2,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $BaseDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+
 . "$BaseDir\lib\ui.ps1"
 . "$BaseDir\lib\red.ps1"
 . "$BaseDir\lib\dhcp.ps1"
@@ -12,8 +13,8 @@ function Menu-Principal {
         Write-Host "===== DHCP (Windows Server 2022) ====="
         Write-Host "1) Verificar si DHCP esta instalado"
         Write-Host "2) Instalar DHCP (idempotente)"
-        Write-Host "3) Configurar ambito DHCP interactivo"
-        Write-Host "4) Monitoreo 
+        Write-Host "3) Configurar ambito"
+        Write-Host "4) Monitoreo"
         Write-Host "5) Reiniciar servicio DHCP"
         Write-Host "6) Salir"
         $op = Read-Host "Opcion"

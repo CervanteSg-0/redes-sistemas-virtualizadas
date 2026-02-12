@@ -75,7 +75,7 @@ function DHCP-ConfigurarAmbitoInteractivo {
     $iface = Read-Host "Interfaz de red interna [Ethernet]"
     if ([string]::IsNullOrWhiteSpace($iface)) { $iface = "Ethernet" }
 
-    $ipInicio = Leer-IPv4 "Rango inicial (se usa como IP fija del servidor)"
+    $ipInicio = Leer-IPv4 "Rango inicial (IP fija del servidor)"
     $mask     = Leer-Mascara "Mascara" "255.255.255.0"
     $ipFinal  = Leer-FinalConShorthand "Rango final" $ipInicio
 
@@ -102,9 +102,9 @@ function DHCP-ConfigurarAmbitoInteractivo {
     $lease = [TimeSpan]::FromSeconds($leaseSec)
 
     $scopeId = Red-DeIP $ipInicio $mask
-    $prefix = Prefijo-DesdeMascara $mask
+    $prefix  = Prefijo-DesdeMascara $mask
 
-    # 1) IP estatica en la interfaz (Server)
+    # IP estatica en interfaz
     try {
         $exist = Get-NetIPAddress -InterfaceAlias $iface -AddressFamily IPv4 -ErrorAction Stop |
                  Where-Object { $_.IPAddress -ne "127.0.0.1" }
@@ -115,9 +115,7 @@ function DHCP-ConfigurarAmbitoInteractivo {
 
     New-NetIPAddress -InterfaceAlias $iface -IPAddress $ipServidor -PrefixLength $prefix -ErrorAction Stop | Out-Null
 
-    if ($gateway) {
-        try { Set-NetIPConfiguration -InterfaceAlias $iface -IPv4DefaultGateway $gateway -ErrorAction SilentlyContinue | Out-Null } catch {}
-    }
+    if ($gateway) { try { Set-NetIPConfiguration -InterfaceAlias $iface -IPv4DefaultGateway $gateway -ErrorAction SilentlyContinue | Out-Null } catch {} }
 
     if ($dns1 -and $dns2) {
         try { Set-DnsClientServerAddress -InterfaceAlias $iface -ServerAddresses @($dns1,$dns2) -ErrorAction SilentlyContinue | Out-Null } catch {}
@@ -125,10 +123,10 @@ function DHCP-ConfigurarAmbitoInteractivo {
         try { Set-DnsClientServerAddress -InterfaceAlias $iface -ServerAddresses @($dns1) -ErrorAction SilentlyContinue | Out-Null } catch {}
     }
 
-    # 2) Binding DHCP (si aplica)
+    # Binding DHCP
     try { Set-DhcpServerv4Binding -InterfaceAlias $iface -BindingState $true -ErrorAction SilentlyContinue | Out-Null } catch {}
 
-    # 3) Crear/actualizar scope idempotente
+    # Scope idempotente
     $existe = $null
     try { $existe = Get-DhcpServerv4Scope -ScopeId $scopeId -ErrorAction Stop } catch { $existe = $null }
 
@@ -141,11 +139,8 @@ function DHCP-ConfigurarAmbitoInteractivo {
     Set-DhcpServerv4Scope -ScopeId $scopeId -LeaseDuration $lease | Out-Null
 
     if ($gateway) { Set-DhcpServerv4OptionValue -ScopeId $scopeId -Router $gateway | Out-Null }
-    if ($dns1 -and $dns2) {
-        Set-DhcpServerv4OptionValue -ScopeId $scopeId -DnsServer @($dns1,$dns2) | Out-Null
-    } elseif ($dns1) {
-        Set-DhcpServerv4OptionValue -ScopeId $scopeId -DnsServer @($dns1) | Out-Null
-    }
+    if ($dns1 -and $dns2) { Set-DhcpServerv4OptionValue -ScopeId $scopeId -DnsServer @($dns1,$dns2) | Out-Null }
+    elseif ($dns1) { Set-DhcpServerv4OptionValue -ScopeId $scopeId -DnsServer @($dns1) | Out-Null }
 
     Restart-Service DHCPServer
 
@@ -155,3 +150,4 @@ function DHCP-ConfigurarAmbitoInteractivo {
     Write-Host "ScopeId: $scopeId"
     Write-Host "Pool DHCP: $ipPoolInicio - $ipFinal"
 }
+
