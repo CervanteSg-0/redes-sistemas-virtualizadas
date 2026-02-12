@@ -27,10 +27,10 @@ function Es-IPv4Valida([string]$Ip) {
     if ($Ip -eq "0.0.0.0" -or $Ip -eq "255.255.255.255") { return $false }
 
     $n = Convertir-IPaEntero $Ip
-    if ( ($n -band 0xFF000000) -eq 0x7F000000 ) { return $false } # 127/8 loopback
-    if ( ($n -band 0xFFFF0000) -eq 0xA9FE0000 ) { return $false } # 169.254/16 link-local
-    if ( ($n -band 0xF0000000) -eq 0xE0000000 ) { return $false } # 224/4 multicast
-    if ( ($n -band 0xF0000000) -eq 0xF0000000 ) { return $false } # 240/4 reservado
+    if ( ($n -band 0xFF000000) -eq 0x7F000000 ) { return $false }
+    if ( ($n -band 0xFFFF0000) -eq 0xA9FE0000 ) { return $false }
+    if ( ($n -band 0xF0000000) -eq 0xE0000000 ) { return $false }
+    if ( ($n -band 0xF0000000) -eq 0xF0000000 ) { return $false }
 
     return $true
 }
@@ -124,3 +124,4 @@ function Leer-Entero([string]$Prompt, [int]$Def) {
         Write-Host "Debe ser numero entero."
     }
 }
+
