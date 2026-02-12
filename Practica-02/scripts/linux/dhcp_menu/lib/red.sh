@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+set -u
+
+ip_a_entero() {
+  local ip="$1" a b c d
+  IFS=. read -r a b c d <<<"$ip" || return 1
+  echo $(( (a<<24) + (b<<16) + (c<<8) + d ))
+}
+
+entero_a_ip() {
+  local n="$1"
+  echo "$(( (n>>24) & 255 )).$(( (n>>16) & 255 )).$(( (n>>8) & 255 )).$(( n & 255 ))"
+}
+
+es_ipv4_formato() {
+  local ip="$1" a b c d
+  [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+  IFS=. read -r a b c d <<<"$ip" || return 1
+  for o in "$a" "$b" "$c" "$d"; do
+    [[ "$o" =~ ^[0-9]+$ ]] || return 1
+    (( o>=0 && o<=255 )) || return 1
+  done
+  return 0
+}
+
+# Rechaza rangos no congruentes: 0.0.0.0, 255.255.255.255, loopback, link-local, multicast, etc.
+es_ipv4_valida() {
+  local ip="$1"
+  es_ipv4_formato "$ip" || return 1
+
+  [[ "$ip" != "0.0.0.0" && "$ip" != "255.255.255.255" ]] || return 1
+
+  local n
+  n="$(ip_a_entero "$ip")" || return 1
+
+  # 127.0.0.0/8 (loopback)
+  (( (n & 0xFF000000) != 0x7F000000 )) || return 1
+  # 169.254.0.0/16 (link-local)
+  (( (n & 0xFFFF0000) != 0xA9FE0000 )) || return 1
+  # 224.0.0.0/4 (multicast) y 240.0.0.0/4 (reservado)
+  (( (n & 0xF0000000) != 0xE0000000 )) || return 1
+  (( (n & 0xF0000000) != 0xF0000000 )) || return 1
+
+  return 0
+}
+
+mascara_es_valida() {
+  local m="$1"
+  es_ipv4_formato "$m" || return 1
+  local mi inv
+  mi=$(ip_a_entero "$m") || return 1
+  (( mi != 0 && mi != 4294967295 )) || return 1
+  inv=$(( 4294967295 ^ mi ))
+  (( (inv & (inv + 1)) == 0 )) || return 1
+  return 0
+}
+
+misma_subred() {
+  local ip1="$1" ip2="$2" mask="$3"
+  local i1 i2 m
+  i1=$(ip_a_entero "$ip1") || return 1
+  i2=$(ip_a_entero "$ip2") || return 1
+  m=$(ip_a_entero "$mask") || return 1
+  (( (i1 & m) == (i2 & m) ))
+}
+
+red_de_ip() {
+  local ip="$1" mask="$2"
+  local i m
+  i=$(ip_a_entero "$ip") || return 1
+  m=$(ip_a_entero "$mask") || return 1
+  entero_a_ip $(( i & m ))
+}
+
+broadcast_de_red() {
+  local red="$1" mask="$2"
+  local r m
+  r=$(ip_a_entero "$red") || return 1
+  m=$(ip_a_entero "$mask") || return 1
+  entero_a_ip $(( r | (4294967295 ^ m) ))
+}
+
+incrementar_ip() {
+  local ip="$1"
+  local i
+  i=$(ip_a_entero "$ip") || return 1
+  entero_a_ip $(( i + 1 ))
+}
+
+leer_ipv4() {
+  local prompt="$1" def="${2:-}" v
+  while true; do
+    if [[ -n "$def" ]]; then
+      read -r -p "$prompt [$def]: " v
+      v="${v:-$def}"
+    else
+      read -r -p "$prompt: " v
+    fi
+    if es_ipv4_valida "$v"; then echo "$v"; return 0; fi
+    echo "IP invalida. Ejemplo: 192.168.1.10"
+  done
+}
+
+# Permite final "corto": 115 => X.Y.Z.115 segun inicio
+leer_ipv4_final_con_shorthand() {
+  local prompt="$1" ip_inicio="$2" def="${3:-}" v
+  local a b c _
+  IFS=. read -r a b c _ <<<"$ip_inicio"
+
+  while true; do
+    if [[ -n "$def" ]]; then
+      read -r -p "$prompt [$def]: " v
+      v="${v:-$def}"
+    else
+      read -r -p "$prompt: " v
+    fi
+
+    if [[ "$v" =~ ^[0-9]{1,3}$ ]]; then
+      (( v>=0 && v<=255 )) || { echo "Final invalido (0-255)."; continue; }
+      v="${a}.${b}.${c}.${v}"
+    fi
+
+    if es_ipv4_valida "$v"; then echo "$v"; return 0; fi
+    echo "IP invalida. Ejemplo: 192.168.1.115 o solo 115"
+  done
+}
+
+leer_ipv4_opcional() {
+  local prompt="$1" def="${2:-}" v
+  while true; do
+    if [[ -n "$def" ]]; then
+      read -r -p "$prompt [$def] (ENTER=usar, -=omitir): " v
+      [[ -z "$v" ]] && v="$def"
+      [[ "$v" == "-" ]] && echo "" && return 0
+    else
+      read -r -p "$prompt (ENTER o -=omitir): " v
+      [[ -z "$v" || "$v" == "-" ]] && echo "" && return 0
+    fi
+
+    if es_ipv4_valida "$v"; then echo "$v"; return 0; fi
+    echo "IP invalida. Ejemplo: 192.168.1.1"
+  done
+}
+
+leer_mascara() {
+  local prompt="$1" def="${2:-}" v
+  while true; do
+    if [[ -n "$def" ]]; then
+      read -r -p "$prompt [$def]: " v
+      v="${v:-$def}"
+    else
+      read -r -p "$prompt: " v
+    fi
+    if mascara_es_valida "$v"; then echo "$v"; return 0; fi
+    echo "Mascara invalida. Ejemplo: 255.255.255.0"
+  done
+}
