@@ -19,6 +19,7 @@ instalar_paquete_dhcpd() {
   elif command -v urpmi >/dev/null 2>&1; then
     urpmi --auto dhcp-server || error "Fallo urpmi dhcp-server"
   else
-    error "No encontre dnf ni urpmi. Instala dhcp-server manualmente."
+    error "No encontre dnf ni urpmi."
   fi
 }
+
