@@ -146,10 +146,34 @@ function DHCP-ConfigurarAmbitoInteractivo {
     try { $existe = Get-DhcpServerv4Scope -ComputerName localhost -ScopeId $scopeId -ErrorAction Stop } catch { $existe = $null }
 
     if (-not $existe) {
-        Add-DhcpServerv4Scope -ComputerName localhost -Name $nombre -StartRange $ipPoolInicio -EndRange $ipFinal -SubnetMask $mask -State Active | Out-Null
+    Add-DhcpServerv4Scope -ComputerName localhost `
+        -Name $nombre `
+        -StartRange $ipPoolInicio `
+        -EndRange $ipFinal `
+        -SubnetMask $mask `
+        -State Active | Out-Null
+} else {
+    if ($existe.SubnetMask -ne $mask) {
+        Aviso "El scope ya existe y su mascara es $($existe.SubnetMask). No se puede cambiar con Set-DhcpServerv4Scope."
+        Aviso "Se eliminara y se recreara el scope con la nueva mascara."
+
+        Remove-DhcpServerv4Scope -ComputerName localhost -ScopeId $scopeId -Force | Out-Null
+
+        Add-DhcpServerv4Scope -ComputerName localhost `
+            -Name $nombre `
+            -StartRange $ipPoolInicio `
+            -EndRange $ipFinal `
+            -SubnetMask $mask `
+            -State Active | Out-Null
     } else {
-        Set-DhcpServerv4Scope -ComputerName localhost -ScopeId $scopeId -Name $nombre -StartRange $ipPoolInicio -EndRange $ipFinal -SubnetMask $mask -State Active | Out-Null
+        Set-DhcpServerv4Scope -ComputerName localhost -ScopeId $scopeId `
+            -Name $nombre `
+            -StartRange $ipPoolInicio `
+            -EndRange $ipFinal `
+            -State Active | Out-Null
     }
+}
+
 
     Set-DhcpServerv4Scope -ComputerName localhost -ScopeId $scopeId -LeaseDuration $lease | Out-Null
 
