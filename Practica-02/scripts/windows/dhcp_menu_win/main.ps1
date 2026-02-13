@@ -13,17 +13,14 @@ function Menu-Principal {
         Write-Host "===== DHCP (Windows Server 2022) ====="
         Write-Host "1) Verificar si DHCP esta instalado"
         Write-Host "2) Instalar DHCP (idempotente)"
-        Write-Host "3) Configurar ambito "
-        Write-Host "4) Monitoreo (SSL)"
+        Write-Host "3) Configurar ambito (IP fija = IP inicial; pool = inicial+1..final)"
+        Write-Host "4) Monitoreo (status, scopes, leases)"
         Write-Host "5) Reiniciar servicio DHCP"
         Write-Host "6) Salir"
         $op = Read-Host "Opcion"
 
         switch ($op) {
-            "1" {
-                if (DHCP-EstaInstalado) { Write-Host "DHCP: INSTALADO" } else { Write-Host "DHCP: NO instalado" }
-                Pausa-Enter
-            }
+            "1" { if (DHCP-EstaInstalado) { Write-Host "DHCP: INSTALADO" } else { Write-Host "DHCP: NO instalado" }; Pausa-Enter }
             "2" { DHCP-Instalar; Pausa-Enter }
             "3" { DHCP-ConfigurarAmbitoInteractivo; Pausa-Enter }
             "4" { DHCP-Monitoreo; Pausa-Enter }

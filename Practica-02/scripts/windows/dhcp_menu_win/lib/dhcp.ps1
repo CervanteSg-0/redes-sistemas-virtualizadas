@@ -8,15 +8,11 @@ function DHCP-Instalar {
 
     if (DHCP-EstaInstalado) {
         $r = Read-Host "DHCP ya esta instalado. Reinstalar? (s/n)"
-        if ($r -ne "s" -and $r -ne "S") {
-            Write-Host "No se reinstalo."
-            return
-        }
+        if ($r -ne "s" -and $r -ne "S") { Write-Host "No se reinstalo."; return }
         Uninstall-WindowsFeature -Name DHCP -IncludeManagementTools -ErrorAction SilentlyContinue | Out-Null
     }
 
     $res = Install-WindowsFeature -Name DHCP -IncludeManagementTools
-
     if ($res.RestartNeeded -and $res.RestartNeeded -ne "No") {
         Aviso "Se requiere reiniciar el servidor para completar la instalacion del rol DHCP."
         Aviso "Reinicia y vuelve a ejecutar el menu."
@@ -24,10 +20,7 @@ function DHCP-Instalar {
     }
 
     $m = Get-Module -ListAvailable DhcpServer -ErrorAction SilentlyContinue
-    if (-not $m) {
-        Aviso "El modulo DhcpServer aun no esta disponible. Reinicia el servidor."
-        return
-    }
+    if (-not $m) { Aviso "Modulo DhcpServer no disponible. Reinicia el servidor."; return }
 
     Import-Module DhcpServer -ErrorAction Stop
     Write-Host "DHCP instalado y modulo disponible."
@@ -46,6 +39,7 @@ function DHCP-Monitoreo {
 
     Write-Host ""
     Write-Host "== Scopes =="
+    $scopes = @()
     try {
         $scopes = Get-DhcpServerv4Scope -ComputerName localhost -ErrorAction Stop
         $scopes | Format-Table ScopeId, Name, StartRange, EndRange, SubnetMask, State -AutoSize
@@ -57,29 +51,20 @@ function DHCP-Monitoreo {
     foreach ($s in $scopes) {
         Write-Host ""
         Write-Host "== Leases (PowerShell) del ScopeId $($s.ScopeId) =="
-
         try {
             $leases = Get-DhcpServerv4Lease -ComputerName localhost -ScopeId $s.ScopeId -AllLeases -ErrorAction Stop
             if ($leases) {
-                $leases |
-                    Sort-Object IPAddress |
-                    Select-Object IPAddress, ClientId, HostName, AddressState, LeaseExpiryTime |
-                    Format-Table -AutoSize
-                continue
+                $leases | Sort-Object IPAddress |
+                  Select-Object IPAddress, ClientId, HostName, AddressState, LeaseExpiryTime |
+                  Format-Table -AutoSize
             } else {
                 Write-Host "PowerShell no devolvio leases. Probando netsh..."
+                cmd /c "netsh dhcp server scope $($s.ScopeId) show clients 1"
             }
         } catch {
             Write-Host "PowerShell fallo: $($_.Exception.Message)"
             Write-Host "Probando netsh..."
-        }
-
-        # Fallback netsh (mas tolerante)
-        try {
-            $sid = $s.ScopeId.ToString()
-            cmd /c "netsh dhcp server scope $sid show clients 1"
-        } catch {
-            Write-Host "netsh fallo."
+            cmd /c "netsh dhcp server scope $($s.ScopeId) show clients 1"
         }
     }
 }
@@ -107,31 +92,21 @@ function DHCP-ConfigurarAmbitoInteractivo {
     $ei = Convertir-IPaEntero $ipFinal
     if ($si -ge $ei) { Error-Salir "El rango inicial debe ser menor que el rango final." }
 
-    # Mascara/prefijo calculada desde IPs (supernet mínima)
-    $pref = PrefijoMinimo-QueCubreRango $ipInicio $ipFinal
-    if ($pref -lt 8) { Aviso "Prefijo calculado muy amplio (/$pref). Revisalo." }
+    # FIX: prefijo para DHCP: calcula por IPs pero fuerza /24 si el rango es corto
+    $pref = Prefijo-ParaDHCPDesdeRango $ipInicio $ipFinal
     $mask = Mascara-DesdePrefijo $pref
     if (-not $mask) { Error-Salir "No pude calcular mascara desde prefijo /$pref." }
-
-    Write-Host "Mascara calculada: $mask (/$pref)"
-
-    # Validacion adicional: con esa mascara, inicio/final deben caer en misma subred
-    if (-not (Misma-Subred $ipInicio $ipFinal $mask)) {
-        Error-Salir "Con la mascara calculada, inicio y final no caen en la misma subred (esto no deberia pasar)."
-    }
-
-    # Server IP = inicio; Pool = inicio+1..final
-    $ipServidor   = $ipInicio
-    $ipPoolInicio = Incrementar-IP $ipInicio
-    $psi = Convertir-IPaEntero $ipPoolInicio
-    if ($psi -gt $ei) { Error-Salir "Pool invalido: (inicio+1) es mayor que final." }
 
     $scopeIdStr = Red-DeIP $ipInicio $mask
     $scopeId    = [System.Net.IPAddress]$scopeIdStr
 
-    if (-not (Es-RFC1918 $ipInicio)) {
-        Aviso "Estas usando un rango NO RFC1918 (no privado). En laboratorio puede haber comportamientos raros, pero se permite."
-    }
+    Write-Host "Mascara usada para DHCP: $mask (/$pref)"
+    Write-Host "ScopeId: $scopeIdStr"
+
+    $ipServidor   = $ipInicio
+    $ipPoolInicio = Incrementar-IP $ipInicio
+    $psi = Convertir-IPaEntero $ipPoolInicio
+    if ($psi -gt $ei) { Error-Salir "Pool invalido: (inicio+1) es mayor que final." }
 
     $gateway = Leer-IPv4Opcional "Puerta de enlace (opcional)"
     $dns1 = Leer-IPv4Opcional "DNS primario (opcional)"
@@ -139,11 +114,10 @@ function DHCP-ConfigurarAmbitoInteractivo {
     if ($dns1) { $dns2 = Leer-IPv4Opcional "DNS secundario (opcional)" }
 
     $leaseSec = Leer-Entero "Lease time en segundos" 86400
-    # aqui ajusta maximo si quieres 100000000
     if ($leaseSec -lt 60 -or $leaseSec -gt 100000000) { Error-Salir "Lease fuera de rango (60..100000000)." }
     $lease = [TimeSpan]::FromSeconds($leaseSec)
 
-    # 1) IP estatica en la interfaz (Server)
+    # IP estatica server
     try {
         $exist = Get-NetIPAddress -InterfaceAlias $iface -AddressFamily IPv4 -ErrorAction Stop |
                  Where-Object { $_.IPAddress -ne "127.0.0.1" }
@@ -164,10 +138,10 @@ function DHCP-ConfigurarAmbitoInteractivo {
         try { Set-DnsClientServerAddress -InterfaceAlias $iface -ServerAddresses @([System.Net.IPAddress]$dns1) -ErrorAction SilentlyContinue | Out-Null } catch {}
     }
 
-    # 2) Binding DHCP a la interfaz
+    # Binding DHCP
     try { Set-DhcpServerv4Binding -InterfaceAlias $iface -BindingState $true -ErrorAction SilentlyContinue | Out-Null } catch {}
 
-    # 3) Crear/actualizar scope (idempotente)
+    # Crear/Actualizar scope idempotente
     $existe = $null
     try { $existe = Get-DhcpServerv4Scope -ComputerName localhost -ScopeId $scopeId -ErrorAction Stop } catch { $existe = $null }
 
@@ -179,22 +153,18 @@ function DHCP-ConfigurarAmbitoInteractivo {
 
     Set-DhcpServerv4Scope -ComputerName localhost -ScopeId $scopeId -LeaseDuration $lease | Out-Null
 
-    # 4) Opciones (DNS/GW) con casteo a IPAddress para evitar "not valid"
+    # Opciones DNS/GW (casteadas)
     try {
         if ($gateway) {
             Set-DhcpServerv4OptionValue -ComputerName localhost -ScopeId $scopeId -Router @([System.Net.IPAddress]$gateway) | Out-Null
         }
-
         if ($dns1 -and $dns2) {
-            $dnsArr = @([System.Net.IPAddress]$dns1, [System.Net.IPAddress]$dns2)
-            Set-DhcpServerv4OptionValue -ComputerName localhost -ScopeId $scopeId -DnsServer $dnsArr | Out-Null
-        }
-        elseif ($dns1) {
-            $dnsArr = @([System.Net.IPAddress]$dns1)
-            Set-DhcpServerv4OptionValue -ComputerName localhost -ScopeId $scopeId -DnsServer $dnsArr | Out-Null
+            Set-DhcpServerv4OptionValue -ComputerName localhost -ScopeId $scopeId -DnsServer @([System.Net.IPAddress]$dns1,[System.Net.IPAddress]$dns2) | Out-Null
+        } elseif ($dns1) {
+            Set-DhcpServerv4OptionValue -ComputerName localhost -ScopeId $scopeId -DnsServer @([System.Net.IPAddress]$dns1) | Out-Null
         }
     } catch {
-        Aviso "No pude aplicar opciones (DNS/GW) en el scope: $($_.Exception.Message)"
+        Aviso "No pude aplicar opciones DNS/GW: $($_.Exception.Message)"
     }
 
     Restart-Service DHCPServer
@@ -203,6 +173,5 @@ function DHCP-ConfigurarAmbitoInteractivo {
     Write-Host "Listo."
     Write-Host "IP fija servidor ($iface): $ipServidor/$pref"
     Write-Host "ScopeId: $scopeIdStr"
-    Write-Host "Mascara: $mask"
     Write-Host "Pool DHCP: $ipPoolInicio - $ipFinal"
 }

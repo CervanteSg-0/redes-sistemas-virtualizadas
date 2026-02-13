@@ -18,3 +18,4 @@ function Asegurar-Admin {
         Error-Salir "Ejecuta PowerShell como Administrador."
     }
 }
+

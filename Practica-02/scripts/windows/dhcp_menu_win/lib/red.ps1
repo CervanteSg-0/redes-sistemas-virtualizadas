@@ -27,14 +27,10 @@ function Es-IPv4Valida([string]$Ip) {
     if ($Ip -eq "0.0.0.0" -or $Ip -eq "255.255.255.255") { return $false }
 
     $n = Convertir-IPaEntero $Ip
-    # 127/8 loopback
-    if ( ($n -band 0xFF000000) -eq 0x7F000000 ) { return $false }
-    # 169.254/16 link-local
-    if ( ($n -band 0xFFFF0000) -eq 0xA9FE0000 ) { return $false }
-    # 224/4 multicast
-    if ( ($n -band 0xF0000000) -eq 0xE0000000 ) { return $false }
-    # 240/4 reservado
-    if ( ($n -band 0xF0000000) -eq 0xF0000000 ) { return $false }
+    if ( ($n -band 0xFF000000) -eq 0x7F000000 ) { return $false } # 127/8
+    if ( ($n -band 0xFFFF0000) -eq 0xA9FE0000 ) { return $false } # 169.254/16
+    if ( ($n -band 0xF0000000) -eq 0xE0000000 ) { return $false } # 224/4
+    if ( ($n -band 0xF0000000) -eq 0xF0000000 ) { return $false } # 240/4
 
     return $true
 }
@@ -98,18 +94,14 @@ function Mascara-DesdePrefijo([int]$Prefix) {
     if ($Prefix -lt 0 -or $Prefix -gt 32) { return $null }
     if ($Prefix -eq 0) { return "0.0.0.0" }
     $mask = [uint32]0
-    for ($i=0; $i -lt $Prefix; $i++) {
-        $mask = $mask -bor ([uint32]1 -shl (31 - $i))
-    }
+    for ($i=0; $i -lt $Prefix; $i++) { $mask = $mask -bor ([uint32]1 -shl (31 - $i)) }
     return (Convertir-EnteroaIP $mask)
 }
 
 function PrefijoMinimo-QueCubreRango([string]$IpInicio, [string]$IpFinal) {
-    # Calcula prefijo mínimo que contiene ambas IPs (supernet mínima)
     $a = Convertir-IPaEntero $IpInicio
     $b = Convertir-IPaEntero $IpFinal
     $xor = $a -bxor $b
-
     if ($xor -eq 0) { return 32 }
 
     $msb = -1
@@ -119,23 +111,15 @@ function PrefijoMinimo-QueCubreRango([string]$IpInicio, [string]$IpFinal) {
     return (32 - ($msb + 1))
 }
 
+function Prefijo-ParaDHCPDesdeRango([string]$IpInicio, [string]$IpFinal) {
+    # Calcula desde IPs, pero FORZA /24 si saliera mas especifico (ej /30 por rangos cortos)
+    $p = PrefijoMinimo-QueCubreRango $IpInicio $IpFinal
+    if ($p -gt 24) { return 24 }
+    return $p
+}
+
 function Red-DeIP([string]$Ip, [string]$Mask) {
     $i = Convertir-IPaEntero $Ip
     $m = Convertir-IPaEntero $Mask
     return Convertir-EnteroaIP ([UInt32]($i -band $m))
-}
-
-function Misma-Subred([string]$Ip1, [string]$Ip2, [string]$Mask) {
-    $i1 = Convertir-IPaEntero $Ip1
-    $i2 = Convertir-IPaEntero $Ip2
-    $m  = Convertir-IPaEntero $Mask
-    return ( ($i1 -band $m) -eq ($i2 -band $m) )
-}
-
-function Es-RFC1918([string]$Ip) {
-    $n = Convertir-IPaEntero $Ip
-    if ( ($n -band 0xFF000000) -eq 0x0A000000 ) { return $true }      # 10/8
-    if ( ($n -band 0xFFF00000) -eq 0xAC100000 ) { return $true }      # 172.16/12
-    if ( ($n -band 0xFFFF0000) -eq 0xC0A80000 ) { return $true }      # 192.168/16
-    return $false
 }
