@@ -15,17 +15,22 @@ function DHCP-Instalar {
         Uninstall-WindowsFeature -Name DHCP -IncludeManagementTools -ErrorAction SilentlyContinue | Out-Null
     }
 
-    Install-WindowsFeature -Name DHCP -IncludeManagementTools | Out-Null
+    $res = Install-WindowsFeature -Name DHCP -IncludeManagementTools
+
+    if ($res.RestartNeeded -and $res.RestartNeeded -ne "No") {
+        Aviso "Se requiere reiniciar el servidor para completar la instalacion del rol DHCP."
+        Aviso "Reinicia y vuelve a ejecutar el menu."
+        return
+    }
+
+    $m = Get-Module -ListAvailable DhcpServer -ErrorAction SilentlyContinue
+    if (-not $m) {
+        Aviso "El modulo DhcpServer aun no esta disponible. Reinicia el servidor."
+        return
+    }
+
     Import-Module DhcpServer -ErrorAction Stop
-
-    try {
-        $ip = (Get-NetIPAddress -AddressFamily IPv4 |
-               Where-Object { $_.IPAddress -ne "127.0.0.1" -and $_.PrefixOrigin -ne "WellKnown" } |
-               Select-Object -First 1 -ExpandProperty IPAddress)
-        if ($ip) { Add-DhcpServerInDC -DnsName $env:COMPUTERNAME -IPAddress $ip | Out-Null }
-    } catch { }
-
-    Write-Host "DHCP instalado."
+    Write-Host "DHCP instalado y modulo disponible."
 }
 
 function DHCP-ReiniciarServicio {
@@ -42,33 +47,41 @@ function DHCP-Monitoreo {
     Write-Host ""
     Write-Host "== Scopes =="
     try {
-        Get-DhcpServerv4Scope | Format-Table ScopeId, Name, StartRange, EndRange, SubnetMask, State -AutoSize
+        $scopes = Get-DhcpServerv4Scope -ComputerName localhost -ErrorAction Stop
+        $scopes | Format-Table ScopeId, Name, StartRange, EndRange, SubnetMask, State -AutoSize
     } catch {
-        Write-Host "No hay scopes o el modulo no esta disponible."
+        Write-Host "No pude leer scopes: $($_.Exception.Message)"
+        return
     }
 
-    Write-Host ""
-  $scope = Read-Host "ScopeId para ver leases (ENTER=omitir, ej 200.200.200.0)"
-$scope = $scope.Trim()
+    foreach ($s in $scopes) {
+        Write-Host ""
+        Write-Host "== Leases (PowerShell) del ScopeId $($s.ScopeId) =="
 
-if (-not [string]::IsNullOrWhiteSpace($scope)) {
-    try {
-        Import-Module DhcpServer -ErrorAction Stop
-
-        $leases = Get-DhcpServerv4Lease -ComputerName localhost -ScopeId $scope -AllLeases -ErrorAction Stop
-        if (-not $leases) {
-            Write-Host "No hay leases en ese ScopeId."
-        } else {
-            $leases |
-              Sort-Object IPAddress |
-              Select-Object IPAddress, ClientId, HostName, AddressState, LeaseExpiryTime |
-              Format-Table -AutoSize
+        try {
+            $leases = Get-DhcpServerv4Lease -ComputerName localhost -ScopeId $s.ScopeId -AllLeases -ErrorAction Stop
+            if ($leases) {
+                $leases |
+                    Sort-Object IPAddress |
+                    Select-Object IPAddress, ClientId, HostName, AddressState, LeaseExpiryTime |
+                    Format-Table -AutoSize
+                continue
+            } else {
+                Write-Host "PowerShell no devolvio leases. Probando netsh..."
+            }
+        } catch {
+            Write-Host "PowerShell fallo: $($_.Exception.Message)"
+            Write-Host "Probando netsh..."
         }
-    } catch {
-        Write-Host "Error leyendo leases: $($_.Exception.Message)"
-    }
-}
 
+        # Fallback netsh (mas tolerante)
+        try {
+            $sid = $s.ScopeId.ToString()
+            cmd /c "netsh dhcp server scope $sid show clients 1"
+        } catch {
+            Write-Host "netsh fallo."
+        }
+    }
 }
 
 function DHCP-ConfigurarAmbitoInteractivo {
@@ -77,6 +90,7 @@ function DHCP-ConfigurarAmbitoInteractivo {
 
     $nombre = Read-Host "Nombre descriptivo del ambito [Scope-1]"
     if ([string]::IsNullOrWhiteSpace($nombre)) { $nombre = "Scope-1" }
+    $nombre = $nombre.Trim()
 
     Write-Host ""
     Write-Host "Interfaces disponibles (Up):"
@@ -84,37 +98,52 @@ function DHCP-ConfigurarAmbitoInteractivo {
 
     $iface = Read-Host "Interfaz de red interna [Ethernet]"
     if ([string]::IsNullOrWhiteSpace($iface)) { $iface = "Ethernet" }
+    $iface = $iface.Trim()
 
     $ipInicio = Leer-IPv4 "Rango inicial (IP fija del servidor)"
-    $mask     = Leer-Mascara "Mascara" "255.255.255.0"
     $ipFinal  = Leer-FinalConShorthand "Rango final" $ipInicio
-
-    if (-not (Misma-Subred $ipInicio $ipFinal $mask)) { Error-Salir "Inicio y final no estan en la misma subred." }
 
     $si = Convertir-IPaEntero $ipInicio
     $ei = Convertir-IPaEntero $ipFinal
     if ($si -ge $ei) { Error-Salir "El rango inicial debe ser menor que el rango final." }
 
+    # Mascara/prefijo calculada desde IPs (supernet mínima)
+    $pref = PrefijoMinimo-QueCubreRango $ipInicio $ipFinal
+    if ($pref -lt 8) { Aviso "Prefijo calculado muy amplio (/$pref). Revisalo." }
+    $mask = Mascara-DesdePrefijo $pref
+    if (-not $mask) { Error-Salir "No pude calcular mascara desde prefijo /$pref." }
+
+    Write-Host "Mascara calculada: $mask (/$pref)"
+
+    # Validacion adicional: con esa mascara, inicio/final deben caer en misma subred
+    if (-not (Misma-Subred $ipInicio $ipFinal $mask)) {
+        Error-Salir "Con la mascara calculada, inicio y final no caen en la misma subred (esto no deberia pasar)."
+    }
+
+    # Server IP = inicio; Pool = inicio+1..final
     $ipServidor   = $ipInicio
     $ipPoolInicio = Incrementar-IP $ipInicio
     $psi = Convertir-IPaEntero $ipPoolInicio
     if ($psi -gt $ei) { Error-Salir "Pool invalido: (inicio+1) es mayor que final." }
 
-    $gateway = Leer-IPv4Opcional "Puerta de enlace (opcional)"
-    if ($gateway -and -not (Misma-Subred $gateway $ipInicio $mask)) { Error-Salir "Gateway fuera de la subred." }
+    $scopeIdStr = Red-DeIP $ipInicio $mask
+    $scopeId    = [System.Net.IPAddress]$scopeIdStr
 
+    if (-not (Es-RFC1918 $ipInicio)) {
+        Aviso "Estas usando un rango NO RFC1918 (no privado). En laboratorio puede haber comportamientos raros, pero se permite."
+    }
+
+    $gateway = Leer-IPv4Opcional "Puerta de enlace (opcional)"
     $dns1 = Leer-IPv4Opcional "DNS primario (opcional)"
     $dns2 = ""
     if ($dns1) { $dns2 = Leer-IPv4Opcional "DNS secundario (opcional)" }
 
     $leaseSec = Leer-Entero "Lease time en segundos" 86400
+    # aqui ajusta maximo si quieres 100000000
     if ($leaseSec -lt 60 -or $leaseSec -gt 100000000) { Error-Salir "Lease fuera de rango (60..100000000)." }
     $lease = [TimeSpan]::FromSeconds($leaseSec)
 
-    $scopeId = Red-DeIP $ipInicio $mask
-    $prefix  = Prefijo-DesdeMascara $mask
-
-    # IP estatica en interfaz
+    # 1) IP estatica en la interfaz (Server)
     try {
         $exist = Get-NetIPAddress -InterfaceAlias $iface -AddressFamily IPv4 -ErrorAction Stop |
                  Where-Object { $_.IPAddress -ne "127.0.0.1" }
@@ -123,41 +152,57 @@ function DHCP-ConfigurarAmbitoInteractivo {
         }
     } catch { }
 
-    New-NetIPAddress -InterfaceAlias $iface -IPAddress $ipServidor -PrefixLength $prefix -ErrorAction Stop | Out-Null
+    New-NetIPAddress -InterfaceAlias $iface -IPAddress $ipServidor -PrefixLength $pref -ErrorAction Stop | Out-Null
 
-    if ($gateway) { try { Set-NetIPConfiguration -InterfaceAlias $iface -IPv4DefaultGateway $gateway -ErrorAction SilentlyContinue | Out-Null } catch {} }
+    if ($gateway) {
+        try { Set-NetIPConfiguration -InterfaceAlias $iface -IPv4DefaultGateway ([System.Net.IPAddress]$gateway) -ErrorAction SilentlyContinue | Out-Null } catch {}
+    }
 
     if ($dns1 -and $dns2) {
-        try { Set-DnsClientServerAddress -InterfaceAlias $iface -ServerAddresses @($dns1,$dns2) -ErrorAction SilentlyContinue | Out-Null } catch {}
+        try { Set-DnsClientServerAddress -InterfaceAlias $iface -ServerAddresses @([System.Net.IPAddress]$dns1,[System.Net.IPAddress]$dns2) -ErrorAction SilentlyContinue | Out-Null } catch {}
     } elseif ($dns1) {
-        try { Set-DnsClientServerAddress -InterfaceAlias $iface -ServerAddresses @($dns1) -ErrorAction SilentlyContinue | Out-Null } catch {}
+        try { Set-DnsClientServerAddress -InterfaceAlias $iface -ServerAddresses @([System.Net.IPAddress]$dns1) -ErrorAction SilentlyContinue | Out-Null } catch {}
     }
 
-    # Binding DHCP
+    # 2) Binding DHCP a la interfaz
     try { Set-DhcpServerv4Binding -InterfaceAlias $iface -BindingState $true -ErrorAction SilentlyContinue | Out-Null } catch {}
 
-    # Scope idempotente
+    # 3) Crear/actualizar scope (idempotente)
     $existe = $null
-    try { $existe = Get-DhcpServerv4Scope -ScopeId $scopeId -ErrorAction Stop } catch { $existe = $null }
+    try { $existe = Get-DhcpServerv4Scope -ComputerName localhost -ScopeId $scopeId -ErrorAction Stop } catch { $existe = $null }
 
     if (-not $existe) {
-        Add-DhcpServerv4Scope -Name $nombre -StartRange $ipPoolInicio -EndRange $ipFinal -SubnetMask $mask -State Active | Out-Null
+        Add-DhcpServerv4Scope -ComputerName localhost -Name $nombre -StartRange $ipPoolInicio -EndRange $ipFinal -SubnetMask $mask -State Active | Out-Null
     } else {
-        Set-DhcpServerv4Scope -ScopeId $scopeId -Name $nombre -StartRange $ipPoolInicio -EndRange $ipFinal -SubnetMask $mask -State Active | Out-Null
+        Set-DhcpServerv4Scope -ComputerName localhost -ScopeId $scopeId -Name $nombre -StartRange $ipPoolInicio -EndRange $ipFinal -SubnetMask $mask -State Active | Out-Null
     }
 
-    Set-DhcpServerv4Scope -ScopeId $scopeId -LeaseDuration $lease | Out-Null
+    Set-DhcpServerv4Scope -ComputerName localhost -ScopeId $scopeId -LeaseDuration $lease | Out-Null
 
-    if ($gateway) { Set-DhcpServerv4OptionValue -ScopeId $scopeId -Router $gateway | Out-Null }
-    if ($dns1 -and $dns2) { Set-DhcpServerv4OptionValue -ScopeId $scopeId -DnsServer @($dns1,$dns2) | Out-Null }
-    elseif ($dns1) { Set-DhcpServerv4OptionValue -ScopeId $scopeId -DnsServer @($dns1) | Out-Null }
+    # 4) Opciones (DNS/GW) con casteo a IPAddress para evitar "not valid"
+    try {
+        if ($gateway) {
+            Set-DhcpServerv4OptionValue -ComputerName localhost -ScopeId $scopeId -Router @([System.Net.IPAddress]$gateway) | Out-Null
+        }
+
+        if ($dns1 -and $dns2) {
+            $dnsArr = @([System.Net.IPAddress]$dns1, [System.Net.IPAddress]$dns2)
+            Set-DhcpServerv4OptionValue -ComputerName localhost -ScopeId $scopeId -DnsServer $dnsArr | Out-Null
+        }
+        elseif ($dns1) {
+            $dnsArr = @([System.Net.IPAddress]$dns1)
+            Set-DhcpServerv4OptionValue -ComputerName localhost -ScopeId $scopeId -DnsServer $dnsArr | Out-Null
+        }
+    } catch {
+        Aviso "No pude aplicar opciones (DNS/GW) en el scope: $($_.Exception.Message)"
+    }
 
     Restart-Service DHCPServer
 
     Write-Host ""
     Write-Host "Listo."
-    Write-Host "IP fija servidor ($iface): $ipServidor/$prefix"
-    Write-Host "ScopeId: $scopeId"
+    Write-Host "IP fija servidor ($iface): $ipServidor/$pref"
+    Write-Host "ScopeId: $scopeIdStr"
+    Write-Host "Mascara: $mask"
     Write-Host "Pool DHCP: $ipPoolInicio - $ipFinal"
 }
-

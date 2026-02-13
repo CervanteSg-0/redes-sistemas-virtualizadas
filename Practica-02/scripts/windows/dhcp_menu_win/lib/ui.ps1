@@ -3,6 +3,10 @@ function Error-Salir([string]$Mensaje) {
     throw $Mensaje
 }
 
+function Aviso([string]$Mensaje) {
+    Write-Host "[WARNING] $Mensaje" -ForegroundColor Yellow
+}
+
 function Pausa-Enter {
     Read-Host "Enter para continuar..."
 }
