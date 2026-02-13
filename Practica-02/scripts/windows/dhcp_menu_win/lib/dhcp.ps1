@@ -98,7 +98,7 @@ function DHCP-ConfigurarAmbitoInteractivo {
     if ($dns1) { $dns2 = Leer-IPv4Opcional "DNS secundario (opcional)" }
 
     $leaseSec = Leer-Entero "Lease time en segundos" 86400
-    if ($leaseSec -lt 60 -or $leaseSec -gt 31536000) { Error-Salir "Lease fuera de rango (60..31536000)." }
+    if ($leaseSec -lt 60 -or $leaseSec -gt 100000000) { Error-Salir "Lease fuera de rango (60..100000000)." }
     $lease = [TimeSpan]::FromSeconds($leaseSec)
 
     $scopeId = Red-DeIP $ipInicio $mask
