@@ -48,17 +48,27 @@ function DHCP-Monitoreo {
     }
 
     Write-Host ""
-    $scope = Read-Host "ScopeId para ver leases (ENTER=omitir, ej 103.5.153.0)"
-    if (-not [string]::IsNullOrWhiteSpace($scope)) {
-        try {
-            Get-DhcpServerv4Lease -ScopeId $scope |
-                Sort-Object IPAddress |
-                Select-Object IPAddress, ClientId, HostName, AddressState, LeaseExpiryTime |
-                Format-Table -AutoSize
-        } catch {
-            Write-Host "No pude leer leases para ese ScopeId."
+  $scope = Read-Host "ScopeId para ver leases (ENTER=omitir, ej 200.200.200.0)"
+$scope = $scope.Trim()
+
+if (-not [string]::IsNullOrWhiteSpace($scope)) {
+    try {
+        Import-Module DhcpServer -ErrorAction Stop
+
+        $leases = Get-DhcpServerv4Lease -ComputerName localhost -ScopeId $scope -AllLeases -ErrorAction Stop
+        if (-not $leases) {
+            Write-Host "No hay leases en ese ScopeId."
+        } else {
+            $leases |
+              Sort-Object IPAddress |
+              Select-Object IPAddress, ClientId, HostName, AddressState, LeaseExpiryTime |
+              Format-Table -AutoSize
         }
+    } catch {
+        Write-Host "Error leyendo leases: $($_.Exception.Message)"
     }
+}
+
 }
 
 function DHCP-ConfigurarAmbitoInteractivo {
