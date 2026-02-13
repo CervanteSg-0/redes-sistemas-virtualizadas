@@ -206,10 +206,10 @@ configurar_dhcp_interactivo() {
     dns2="$(leer_ipv4_opcional "DNS secundario (opcional)" "")"
   fi
 
-  read -r -p "Lease time en segundos [86400]: " lease_sec
+  read -r -p "Lease time en segundos " lease_sec
   lease_sec="${lease_sec:-86400}"
   [[ "$lease_sec" =~ ^[0-9]+$ ]] || error "Lease debe ser numero entero (segundos)"
-  (( lease_sec >= 60 && lease_sec <= 31536000 )) || error "Lease fuera de rango (60..31536000)"
+  (( lease_sec >= 60 && lease_sec <= 100000000 )) || error "Lease fuera de rango (60..100000000)"
 
   red="$(red_de_ip "$ip_inicio" "$mask")" || error "No pude calcular red"
   broadcast="$(broadcast_de_red "$red" "$mask")" || error "No pude calcular broadcast"
