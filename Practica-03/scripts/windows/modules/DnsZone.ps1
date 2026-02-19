@@ -6,15 +6,16 @@ function Ensure-ZoneAndRecords {
 
   $domain = (Read-Host "Dominio [reprobados.com]").Trim()
   if ([string]::IsNullOrWhiteSpace($domain)) { $domain = "reprobados.com" }
+  $domain = $domain.ToLower()
+
+  if (-not (Is-ValidZoneName $domain)) { throw "Nombre de zona invalido. Ej: reprobados.com" }
 
   $clientIP = Prompt-IPv4 "IP del CLIENTE (Windows 10) a la que apuntara reprobados.com y www"
   $ttlSec   = Prompt-Int "TTL en segundos" 30 86400 300
-
   $wwwAsCname = Prompt-YesNo "Para www usar CNAME hacia raiz?" $true
 
   Ensure-DnsRole
 
-  # Zona (idempotente)
   $zone = Get-DnsServerZone -Name $domain -ErrorAction SilentlyContinue
   if (-not $zone) {
     Add-DnsServerPrimaryZone -Name $domain -ZoneFile "$domain.dns" -DynamicUpdate NonsecureAndSecure | Out-Null
