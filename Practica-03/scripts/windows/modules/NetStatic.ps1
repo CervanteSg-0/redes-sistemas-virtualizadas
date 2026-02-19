@@ -34,7 +34,6 @@ function Ensure-StaticIP {
   $dns    = (Read-Host "DNS (opcional, ENTER omitir)").Trim()
   if (-not [string]::IsNullOrWhiteSpace($dns) -and -not (Is-ValidIPv4 $dns)) { throw "DNS invalido." }
 
-  # Limpieza IPv4 (evitar conflictos)
   Get-NetIPAddress -InterfaceIndex $ad.IfIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
     Where-Object { $_.IPAddress -ne "127.0.0.1" } |
     ForEach-Object { Remove-NetIPAddress -InterfaceIndex $ad.IfIndex -IPAddress $_.IPAddress -Confirm:$false -ErrorAction SilentlyContinue }

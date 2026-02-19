@@ -27,7 +27,7 @@ function Prompt-IPv4([string]$label) {
   while ($true) {
     $v = (Read-Host $label).Trim()
     if (Is-ValidIPv4 $v) { return $v }
-    Write-Host "  IP invalida. Ej: 192.168.100.20"
+    Write-Host "  IP invalida. Ej: 192.168.100.40"
   }
 }
 
@@ -50,4 +50,11 @@ function Prompt-YesNo([string]$label, [bool]$defaultYes=$true) {
     if ($r -match '^(n|no)$') { return $false }
     Write-Host "  Responde S o N."
   }
+}
+
+function Is-ValidZoneName([string]$zoneName) {
+  if ([string]::IsNullOrWhiteSpace($zoneName)) { return $false }
+  $z = $zoneName.Trim().ToLower()
+  # Validacion basica de FQDN: labels 1-63, total <= 253, termina con TLD 2-63
+  return ($z -match '^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$')
 }
