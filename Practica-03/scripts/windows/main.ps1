@@ -1,25 +1,40 @@
-$base = Split-Path -Parent $MyInvocation.MyCommand.Path
-. "$base\modules\Common.ps1"
-. "$base\modules\NetStatic.ps1"
-. "$base\modules\DnsRole.ps1"
-. "$base\modules\DnsZone.ps1"
+# windows/main.ps1
 
-Assert-Admin
+# Importación de los módulos
+. "$PSScriptRoot\modules\Common.ps1"
+. "$PSScriptRoot\modules\DnsInstall.ps1"
+. "$PSScriptRoot\modules\DnsZone.ps1"
+. "$PSScriptRoot\modules\DnsStatus.ps1"
+. "$PSScriptRoot\modules\DnsRemove.ps1"
 
 while ($true) {
-  Clear-Host
-  Write-Host "===== DNS Windows Server 2022 ====="
-  Write-Host "1) Verificar/Instalar rol DNS"
-  Write-Host "2) Verificar/Configurar IP fija"
-  Write-Host "3) Configurar zona + registros"
-  Write-Host "0) Salir"
-  Write-Host "==================================="
-  $op = (Read-Host "Opcion").Trim()
-  switch ($op) {
-    "1" { Ensure-DnsRole; Pause-Enter }
-    "2" { Ensure-StaticIP; Pause-Enter }
-    "3" { Ensure-ZoneAndRecords; Pause-Enter }
-    "0" { break }
-    default { Write-Host "Opcion invalida"; Pause-Enter }
-  }
+    Write-Host "===== Menú de Configuración ====="
+    Write-Host "1) Instalar DNS"
+    Write-Host "2) Configurar DNS y Dominio"
+    Write-Host "3) Verificar estado del servicio DNS"
+    Write-Host "4) Eliminar dominio de la red"
+    Write-Host "0) Salir"
+    
+    $op = Read-Host "Seleccione una opción"
+
+    switch ($op) {
+        "1" { 
+            Install-DnsRole
+        }
+        "2" { 
+            Configure-DnsZone
+        }
+        "3" { 
+            Get-DnsStatus
+        }
+        "4" { 
+            Remove-DnsZoneByName
+        }
+        "0" { 
+            break
+        }
+        default { 
+            Write-Host "Opción no válida" 
+        }
+    }
 }
