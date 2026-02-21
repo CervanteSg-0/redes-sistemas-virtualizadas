@@ -1,63 +1,86 @@
 #!/usr/bin/env bash
-set -euo pipefail
 
-die(){ echo "[ERROR] $*" >&2; exit 1; }
-pause(){ read -r -p "ENTER para continuar..." _; }
-
-need_root() {
-  if [ "${EUID:-$(id -u)}" -ne 0 ]; then
-    exec sudo -E bash "$0" "$@"
-  fi
+# Función para terminar el script con un mensaje de error
+function die {
+    param($msg)
+    echo "[ERROR] $msg"
+    exit 1
 }
 
-have_cmd(){ command -v "$1" >/dev/null 2>&1; }
-
-trim(){ echo "$1" | xargs; }
-
-valid_ipv4() {
-  local ip="${1:-}"
-  [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
-  IFS='.' read -r a b c d <<<"$ip"
-  for o in "$a" "$b" "$c" "$d"; do
-    [[ "$o" =~ ^[0-9]+$ ]] || return 1
-    (( o >= 0 && o <= 255 )) || return 1
-  done
-  [[ "$ip" != "0.0.0.0" && "$ip" != "255.255.255.255" ]] || return 1
-  return 0
+# Función para mostrar mensajes de información
+function info {
+    param($msg)
+    echo "[INFO] $msg"
 }
 
-valid_prefix() {
-  local p="${1:-}"
-  [[ "$p" =~ ^[0-9]{1,2}$ ]] || return 1
-  (( p >= 1 && p <= 32 )) || return 1
-  return 0
+# Función para mostrar mensajes de éxito
+function ok {
+    param($msg)
+    echo "[OK] $msg"
 }
 
-prompt_ip() {
-  local label="$1" v
-  while true; do
-    read -r -p "$label: " v
-    v="$(trim "${v:-}")"
-    valid_ipv4 "$v" && { echo "$v"; return 0; }
-    echo "  IP invalida. Ej: 192.168.100.10"
-  done
+# Función para mostrar advertencias
+function warn {
+    param($msg)
+    echo "[WARN] $msg"
 }
 
-prompt_yesno() {
-  local label="$1" default="${2:-y}" r
-  while true; do
-    if [[ "$default" == "y" ]]; then
-      read -r -p "$label [S/n]: " r
-      r="${r:-S}"
-    else
-      read -r -p "$label [s/N]: " r
-      r="${r:-N}"
+# Función para pausar la ejecución y esperar la entrada del usuario
+function pause {
+    echo "[PAUSE] Presiona ENTER para continuar..."
+    read -r
+}
+
+# Validación básica de IP v4
+function valid_ipv4 {
+    param($ip)
+    if [[ $ip =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+        local IFS='.' ip1 ip2 ip3 ip4
+        IFS='.' read -r ip1 ip2 ip3 ip4 <<< "$ip"
+        if ((ip1 >= 0 && ip1 <= 255 && ip2 >= 0 && ip2 <= 255 && ip3 >= 0 && ip3 <= 255 && ip4 >= 0 && ip4 <= 255)); then
+            return 0
+        fi
     fi
-    r="$(echo "$r" | tr '[:upper:]' '[:lower:]' | xargs)"
-    case "$r" in
-      s|si|y|yes) return 0 ;;
-      n|no) return 1 ;;
-      *) echo "  Responde S o N." ;;
-    esac
-  done
+    return 1
+}
+
+# Leer IP con validación
+function prompt_ip {
+    param($label)
+    while true; do
+        read -r ip
+        if valid_ipv4 "$ip"; then
+            echo "$ip"
+            return 0
+        else
+            echo "IP inválida. Ejemplo de formato correcto: 192.168.100.50"
+        fi
+    done
+}
+
+# Confirmación de respuesta S/N
+function prompt_yesno {
+    param($label, $defaultYes)
+    local suffix
+    if [ "$defaultYes" = true ]; then
+        suffix="[S/n]"
+    else
+        suffix="[s/N]"
+    fi
+    while true; do
+        read -r response
+        response="${response:-$defaultYes}"
+        if [[ "$response" =~ ^(s|si|y|yes)$ ]]; then
+            return 0
+        elif [[ "$response" =~ ^(n|no)$ ]]; then
+            return 1
+        else
+            echo "$label $suffix"
+        fi
+    done
+}
+
+# Elimina espacios al inicio y al final de una cadena
+function trim {
+    echo "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
 }
