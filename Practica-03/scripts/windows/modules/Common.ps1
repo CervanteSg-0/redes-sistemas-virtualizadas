@@ -54,7 +54,7 @@ function prompt_ip {
     }
 }
 
-# Función para confirmar con S/N
+# Funcion para confirmar con S/N
 function prompt_yesno {
     param([string]$label, [bool]$defaultYes=$true)
     $suffix = if ($defaultYes) { "[S/n]" } else { "[s/N]" }

@@ -4,8 +4,8 @@
 
 function Configure-DnsZone {
     Write-Host "== Configurar Zona DNS (Windows Server) =="
-    $domain = Read-Host "Dominio (ej: reprobados.com)"
-    $clientIp = Read-Host "IP del CLIENTE (Windows 10) a la que apuntará el dominio"
+    $domain = Read-Host "Dominio: "
+    $clientIp = Read-Host "IP del CLIENTE a la que apuntará el dominio"
     $ttl = Read-Host "TTL (segundos)"
 
     # Configura la zona

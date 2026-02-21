@@ -6,7 +6,7 @@ function Install-DnsRole {
     Write-Host "== Instalando DNS Server (Windows Server) =="
     $feat = Get-WindowsFeature DNS
     if ($feat.Installed) {
-        Write-Host "[OK] DNS ya está instalado."
+        Write-Host "[OK] DNS ya esta instalado."
         return
     }
     
