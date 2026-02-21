@@ -1,39 +1,39 @@
 #!/usr/bin/env bash
 
-# Función para terminar el script con un mensaje de error
-function die {
-    param($msg)
+
+die() {
+    local msg="$1"
     echo "[ERROR] $msg"
     exit 1
 }
 
-# Función para mostrar mensajes de información
-function info {
-    param($msg)
+
+info() {
+    local msg="$1"
     echo "[INFO] $msg"
 }
 
-# Función para mostrar mensajes de éxito
-function ok {
-    param($msg)
+
+ok() {
+    local msg="$1"
     echo "[OK] $msg"
 }
 
-# Función para mostrar advertencias
-function warn {
-    param($msg)
+
+warn() {
+    local msg="$1"
     echo "[WARN] $msg"
 }
 
-# Función para pausar la ejecución y esperar la entrada del usuario
-function pause {
+
+pause() {
     echo "[PAUSE] Presiona ENTER para continuar..."
     read -r
 }
 
-# Validación básica de IP v4
-function valid_ipv4 {
-    param($ip)
+
+valid_ipv4() {
+    local ip="$1"
     if [[ $ip =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
         local IFS='.' ip1 ip2 ip3 ip4
         IFS='.' read -r ip1 ip2 ip3 ip4 <<< "$ip"
@@ -44,23 +44,23 @@ function valid_ipv4 {
     return 1
 }
 
-# Leer IP con validación
-function prompt_ip {
-    param($label)
+
+prompt_ip() {
+    local label="$1"
     while true; do
         read -r ip
         if valid_ipv4 "$ip"; then
             echo "$ip"
             return 0
         else
-            echo "IP inválida. Ejemplo de formato correcto: 192.168.100.50"
+            echo "IP invalida: "
         fi
     done
 }
 
-# Confirmación de respuesta S/N
-function prompt_yesno {
-    param($label, $defaultYes)
+prompt_yesno() {
+    local label="$1"
+    local defaultYes="$2"
     local suffix
     if [ "$defaultYes" = true ]; then
         suffix="[S/n]"
@@ -81,6 +81,6 @@ function prompt_yesno {
 }
 
 # Elimina espacios al inicio y al final de una cadena
-function trim {
+trim() {
     echo "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
 }
