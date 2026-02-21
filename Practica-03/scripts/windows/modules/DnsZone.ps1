@@ -4,9 +4,15 @@
 
 function Configure-DnsZone {
     Write-Host "== Configurar Zona DNS (Windows Server) =="
-    $domain = Read-Host "Dominio: "
-    $clientIp = Read-Host "IP del CLIENTE a la que apuntará el dominio"
-    $ttl = Read-Host "TTL (segundos)"
+    $domain = Read-Host "Dominio :"
+    $clientIp = Read-Host "IP del CLIENTE a la que apuntara el dominio"
+    
+    # Validación para TTL
+    $ttl = Read-Host "TTL (segundos) "
+    while ($ttl -lt 30 -or $ttl -gt 200000000) {
+        Write-Host "[ERROR] "
+        $ttl = Read-Host "TTL (segundos) 
+    }
 
     # Configura la zona
     Add-DnsServerPrimaryZone -Name $domain -ZoneFile "$domain.dns" -DynamicUpdate NonsecureAndSecure | Out-Null
