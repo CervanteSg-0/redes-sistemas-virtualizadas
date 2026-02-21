@@ -13,22 +13,22 @@ source "$BASE_DIR/modules/bind_remove.sh"
 
 while true; do
   clear || true
-  echo "===== DNS y DHCP - Configuración ====="
+  echo "===== DNS CONFIGURACION    ========="
   echo "1) Instalar DNS"
   echo "2) Configurar DNS y Dominio"
   echo "3) Verificar estado del servicio DNS"
   echo "4) Eliminar dominio de la red"
-  echo "5) Configuración DHCP"
+  
   echo "0) Salir"
   echo "======================================="
   
-  read -r -p "Opción: " option
+  read -r -p "Opcion: " option
   case "$option" in
     1) install_bind_idempotent; pause ;;
     2) configure_zone_flow; pause ;;
     3) service_status; pause ;;
     4) remove_zone_flow; pause ;;
     0) exit 0 ;;
-    *) echo "Opción inválida"; pause ;;
+    *) echo "Opcion invalida"; pause ;;
   esac
 done

@@ -1,37 +1,37 @@
 #!/usr/bin/env bash
 
-
+# Función para terminar el script con un mensaje de error
 die() {
     local msg="$1"
     echo "[ERROR] $msg"
     exit 1
 }
 
-
+# Función para mostrar mensajes de información
 info() {
     local msg="$1"
     echo "[INFO] $msg"
 }
 
-
+# Función para mostrar mensajes de éxito
 ok() {
     local msg="$1"
     echo "[OK] $msg"
 }
 
-
+# Función para mostrar advertencias
 warn() {
     local msg="$1"
     echo "[WARN] $msg"
 }
 
-
+# Función para pausar la ejecución y esperar la entrada del usuario
 pause() {
     echo "[PAUSE] Presiona ENTER para continuar..."
     read -r
 }
 
-
+# Validación básica de IP v4
 valid_ipv4() {
     local ip="$1"
     if [[ $ip =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
@@ -44,7 +44,7 @@ valid_ipv4() {
     return 1
 }
 
-
+# Leer IP con validación
 prompt_ip() {
     local label="$1"
     while true; do
@@ -53,11 +53,12 @@ prompt_ip() {
             echo "$ip"
             return 0
         else
-            echo "IP invalida: "
+            echo "IP inválida. Ejemplo de formato correcto: 192.168.100.50"
         fi
     done
 }
 
+# Confirmación de respuesta S/N
 prompt_yesno() {
     local label="$1"
     local defaultYes="$2"
@@ -83,4 +84,15 @@ prompt_yesno() {
 # Elimina espacios al inicio y al final de una cadena
 trim() {
     echo "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
+# Función de validación de dominio (FQDN)
+valid_fqdn_zone() {
+    local domain="$1"
+    # Expresión regular para validar FQDN (dominio)
+    if [[ "$domain" =~ ^([a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]]; then
+        return 0
+    else
+        return 1
+    fi
 }
