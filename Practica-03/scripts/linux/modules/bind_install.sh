@@ -11,9 +11,15 @@ is_bind_installed() {
   rpm -q bind >/dev/null 2>&1 || rpm -q bind9 >/dev/null 2>&1
 }
 
+# Comprobamos el gestor de paquetes
+have_cmd() {
+    command -v "$1" >/dev/null 2>&1
+}
+
 # Instalar BIND si no está instalado
 install_bind_idempotent() {
-  echo "== Instalar BIND (idempotente) =="
+  echo "== Instalando BIND (idempotente) =="
+
   if is_bind_installed; then
     ok "BIND ya instalado."
     return 0
@@ -22,11 +28,11 @@ install_bind_idempotent() {
   if have_cmd dnf; then
     info "Usando dnf..."
     dnf -y install bind bind-utils bind-doc || dnf -y install bind9 bind9utils bind9-doc
-  elif have_cmd urpmi; then
-    info "Usando urpmi..."
-    urpmi --auto bind bind-utils bind-doc || urpmi --auto bind9 bind9utils bind9-doc
+  elif have_cmd zypper; then
+    info "Usando zypper..."
+    zypper install -y bind bind-utils bind-doc || zypper install -y bind9 bind9utils bind9-doc
   else
-    die "No encontré dnf/urpmi."
+    die "No encontré dnf ni zypper. No puedo instalar BIND."
   fi
 
   systemctl enable --now "$SERVICE_NAME" >/dev/null 2>&1 || true
