@@ -5,7 +5,6 @@ BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # shellcheck disable=SC1091
 source "$BASE_DIR/modules/common.sh"
-source "$BASE_DIR/modules/net_static.sh"
 source "$BASE_DIR/modules/bind_install.sh"
 source "$BASE_DIR/modules/bind_zone.sh"
 source "$BASE_DIR/modules/bind_status.sh"
