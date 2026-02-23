@@ -1,8 +1,21 @@
 param(
   [Parameter(Mandatory=$true)][string]$DnsServerIP,
   [Parameter(Mandatory=$true)][string]$ClientIP,
-  [string[]]$Domains = @("reprobados.com", "recursadores.com", "quierounavion.com", "apruebeme.com")
+  [string[]]$Domains = @()
 )
+
+# Intentar cargar dominios dinamicamente desde el archivo de manifiesto si no se pasaron por parametro
+$sharedFile = Join-Path $PSScriptRoot "..\dominios_activos.txt"
+if ($Domains.Count -eq 0 -and (Test-Path $sharedFile)) {
+    Write-Host "== Cargando dominios dinamicamente desde $sharedFile ==" -ForegroundColor Cyan
+    $Domains = Get-Content $sharedFile | Where-Object { $_ -match "\." }
+}
+
+# Si sigue vacio, usar una lista de respaldo
+if ($Domains.Count -eq 0) {
+    Write-Host "== Usando lista de dominios por defecto (no se encontro manifiesto) ==" -ForegroundColor Gray
+    $Domains = @("recursadores.com", "quierounavion.com", "apruebeme.com")
+}
 
 function Is-ValidIPv4([string]$ip) {
   if ([string]::IsNullOrWhiteSpace($ip)) { return $false }

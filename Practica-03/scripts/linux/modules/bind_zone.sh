@@ -141,8 +141,21 @@ configure_zone_flow() {
   if command -v rndc >/dev/null 2>&1; then
       rndc flush || true
   fi
+  
+  # Actualizar manifiesto compartido para el cliente
+  update_shared_domains_list
+  
   service_status
   show_listen_53
 
   ok "Zona lista: $domain (apunta a $client_ip)"
+}
+
+update_shared_domains_list() {
+    local shared_file="$BASE_DIR/../dominios_activos.txt"
+    info "Actualizando lista de dominios compartida..."
+    if [[ -f "$NAMED_LOCAL" ]]; then
+        grep "zone" "$NAMED_LOCAL" | cut -d'"' -f2 > "$shared_file"
+        chmod 666 "$shared_file" 2>/dev/null || true
+    fi
 }

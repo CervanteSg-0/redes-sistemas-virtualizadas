@@ -52,7 +52,14 @@ remove_zone_flow() {
 
   info "Reiniciando servicio..."
   service_restart
-  service_status
-
-  ok "Zona eliminada: $domain"
+  service_restart
+  
+  # Actualizar manifiesto compartido
+  if [[ -f "$MOD_DIR/bind_zone.sh" ]]; then
+     # shellcheck disable=SC1091
+     source "$MOD_DIR/bind_zone.sh"
+     update_shared_domains_list
+  fi
+  
+  ok "Zona eliminada y servicio reiniciado."
 }
