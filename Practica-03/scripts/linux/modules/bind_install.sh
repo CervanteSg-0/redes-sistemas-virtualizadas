@@ -25,10 +25,14 @@ install_bind_idempotent() {
 
   if have_cmd dnf; then
     info "Usando dnf..."
-    dnf -y install bind bind-utils bind-doc || dnf -y install bind9 bind9utils bind9-doc
+    # Intentamos instalar los esenciales primero
+    dnf -y install bind bind-utils || dnf -y install bind9 bind9utils || die "No se pudieron instalar los paquetes base de BIND."
+    # Intentamos instalar la documentación como opcional
+    dnf -y install bind-doc >/dev/null 2>&1 || dnf -y install bind9-doc >/dev/null 2>&1 || warn "No se pudo instalar la documentación (bind-doc), pero el servidor debería funcionar."
   elif have_cmd zypper; then
     info "Usando zypper..."
-    zypper install -y bind bind-utils bind-doc || zypper install -y bind9 bind9utils bind9-doc
+    zypper install -y bind bind-utils || die "No se pudieron instalar los paquetes base de BIND con zypper."
+    zypper install -y bind-doc >/dev/null 2>&1 || warn "No se pudo instalar la documentación opcional."
   else
     die "No encontré dnf ni zypper. No puedo instalar BIND."
   fi
