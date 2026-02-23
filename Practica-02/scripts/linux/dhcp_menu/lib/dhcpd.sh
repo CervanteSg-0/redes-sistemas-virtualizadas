@@ -7,7 +7,11 @@ CONF="/etc/dhcpd.conf"
 LEASES_PRIMARY="/var/lib/dhcpd/dhcpd.leases"
 LEASES_FALLBACK="/var/lib/dhcp/dhcpd.leases"
 
-error(){ echo "[ERROR] $*" >&2; exit 1; }
+# Utilerias visuales
+error(){ echo -e "\e[31m[ERROR] $*\e[0m" >&2; exit 1; }
+info(){  echo -e "\e[34m[INFO] $*\e[0m"; }
+ok(){    echo -e "\e[32m[OK] $*\e[0m"; }
+warn(){  echo -e "\e[33m[WARN] $*\e[0m"; }
 
 archivo_leases() {
   [[ -f "$LEASES_PRIMARY" ]] && echo "$LEASES_PRIMARY" && return
@@ -16,8 +20,26 @@ archivo_leases() {
 }
 
 reiniciar_servicio_dhcpd() {
-  systemctl enable --now dhcpd >/dev/null 2>&1 || true
-  systemctl restart dhcpd || error "No pude reiniciar dhcpd. Revisa: journalctl -xeu dhcpd --no-pager | tail -n 80"
+  info "Asegurando permisos en archivos de leases..."
+  local lf
+  lf="$(archivo_leases)"
+  mkdir -p "$(dirname "$lf")" || true
+  touch "$lf" || true
+  chown dhcpd:dhcpd "$lf" >/dev/null 2>&1 || chown root:root "$lf"
+  chmod 664 "$lf" || true
+
+  info "Habilitando y reiniciando servicio dhcpd..."
+  systemctl enable dhcpd >/dev/null 2>&1 || true
+  
+  # Intento de reinicio con reintento si falla (por si la red tarda en subir)
+  if ! systemctl restart dhcpd; then
+    warn "Fallo primer intento de reinicio. Esperando 3 segundos a la red..."
+    sleep 3
+    if ! systemctl restart dhcpd; then
+       error "No pude reiniciar dhcpd. Revisa: journalctl -xeu dhcpd --no-pager | tail -n 80"
+    fi
+  fi
+  ok "Servicio dhcpd reiniciado exitosamente."
 }
 
 estado_servicio_dhcpd() {
@@ -67,12 +89,13 @@ poner_ip_temporal_si_falta() {
   fi
 }
 
-# Mageia: systemd usa $INTERFACES desde /etc/sysconfig/dhcpd
+# Mageia: systemd usa $INTERFACES o $DHCPDARGS desde /etc/sysconfig/dhcpd
 escribir_sysconfig_mageia() {
   local iface="$1" leasefile="$2"
   mkdir -p /etc/sysconfig || true
   cat >/etc/sysconfig/dhcpd <<EOF
 INTERFACES="${iface}"
+DHCPDARGS="${iface}"
 OPTIONS=""
 CONFIGFILE="${CONF}"
 LEASEFILE="${leasefile}"
@@ -259,6 +282,10 @@ EOF
 
   echo "Validando sintaxis..."
   dhcpd -t -cf "$CONF" || error "Error en la configuracion. Revisa $CONF"
+
+  # Sincronizar con el path estándar de Mageia /etc/dhcp/dhcpd.conf
+  mkdir -p /etc/dhcp || true
+  cp "$CONF" /etc/dhcp/dhcpd.conf || true
 
   echo "Reiniciando dhcpd..."
   reiniciar_servicio_dhcpd
