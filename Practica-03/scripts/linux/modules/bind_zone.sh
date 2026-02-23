@@ -92,7 +92,7 @@ www IN  CNAME @
 EOF
 
   chmod 644 "$zone_file" || true
-  chown root:named "$zone_file" 2>/dev/null || chown named:named "$zone_file" 2>/dev/null || true
+  chown named:named "$zone_file" 2>/dev/null || chown root:named "$zone_file" 2>/dev/null || true
   ok "Archivo de zona generado: $zone_file"
 }
 
@@ -136,8 +136,11 @@ configure_zone_flow() {
   info "Validando configuracion..."
   named-checkconf || die "named-checkconf FALLO. Revisa $NAMED_CONF y $NAMED_LOCAL"
 
-  info "Reiniciando servicio..."
+  info "Reiniciando servicio y limpiando cache..."
   service_restart
+  if command -v rndc >/dev/null 2>&1; then
+      rndc flush || true
+  fi
   service_status
   show_listen_53
 

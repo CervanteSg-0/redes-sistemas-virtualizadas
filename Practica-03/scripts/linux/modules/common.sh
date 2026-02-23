@@ -198,3 +198,12 @@ manual_ip_flow() {
         ok "IP asignada (temporal, no se encontro nmcli)."
     fi
 }
+
+show_server_ip() {
+    local ip
+    ip=$(ip -4 addr show ens34 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -n1)
+    if [[ -z "$ip" ]]; then
+        ip=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '127.0.0.1' | head -n1)
+    fi
+    echo -e "\e[33m[TIP] IP del Servidor: $ip (Usa esta IP como DNS en Windows)\e[0m"
+}

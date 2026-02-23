@@ -16,6 +16,7 @@ check_root
 while true; do
   clear || true
   echo "===== DNS CONFIGURACION    ========="
+  show_server_ip
   echo "1) Instalar DNS"
   echo "2) Configurar DNS y Dominio"
   echo "3) Verificar estado del servicio DNS"

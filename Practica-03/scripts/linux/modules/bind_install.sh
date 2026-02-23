@@ -62,16 +62,29 @@ install_bind_idempotent() {
 
 # Configura BIND para permitir consultas externas
 configure_bind_global() {
-  info "Configurando BIND para permitir consultas externas..."
+  info "Configurando BIND para permitir consultas externas (LAB MODE)..."
   
   [[ -f "$NAMED_CONF" ]] || return 1
   
+  # Backup de seguridad
+  cp "$NAMED_CONF" "${NAMED_CONF}.bak" || true
+
   # 1. Escuchar en todas las interfaces (quitar restricción de 127.0.0.1)
-  sed -i 's/listen-on port 53 { 127.0.0.1; };/listen-on port 53 { any; };/g' "$NAMED_CONF"
+  # Usamos una expresión más libre por si hay espacios extra
+  sed -i 's/listen-on port 53 {[^;]*;};/listen-on port 53 { any; };/g' "$NAMED_CONF"
+  
   # 2. Escuchar en IPv6 (any)
-  sed -i 's/listen-on-v6 port 53 { ::1; };/listen-on-v6 port 53 { any; };/g' "$NAMED_CONF"
+  sed -i 's/listen-on-v6 port 53 {[^;]*;};/listen-on-v6 port 53 { any; };/g' "$NAMED_CONF"
+  
   # 3. Permitir consultas desde cualquier IP
-  sed -i 's/allow-query\s*{ localhost; };/allow-query { any; };/g' "$NAMED_CONF"
+  sed -i 's/allow-query\s*{[^;]*;};/allow-query { any; };/g' "$NAMED_CONF"
+
+  # 4. Ajustes adicionales para laboratorios (DNSSEC)
+  # A veces DNSSEC impide que zonas locales funcionen si no están firmadas
+  if grep -q "dnssec-validation" "$NAMED_CONF"; then
+      sed -i 's/dnssec-validation yes;/dnssec-validation no;/g' "$NAMED_CONF"
+      info "Validacion DNSSEC desactivada para compatibilidad local."
+  fi
   
   # Intentar abrir firewall si existe firewall-cmd
   if have_cmd firewall-cmd; then
