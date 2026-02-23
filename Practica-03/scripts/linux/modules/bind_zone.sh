@@ -127,10 +127,7 @@ configure_zone_flow() {
 
   client_ip="$(prompt_ip "IP del CLIENTE (Windows 10) (tu caso: 192.168.100.60)")"
 
-  read -r -p "TTL en segundos [${TTL_DEFAULT}]: " ttl
-  ttl="$(trim "${ttl:-$TTL_DEFAULT}")"
-  [[ "$ttl" =~ ^[0-9]+$ ]] || die "TTL invalido."
-  (( ttl >= 30 && ttl <= 86400 )) || die "TTL fuera de rango (30-86400)."
+  ttl="$TTL_DEFAULT"
 
   install_bind_idempotent
   upsert_zone_block "$domain"

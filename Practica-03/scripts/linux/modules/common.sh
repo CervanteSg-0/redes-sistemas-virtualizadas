@@ -136,3 +136,12 @@ check_root() {
         die "Este script debe ejecutarse como root (sudo)."
     fi
 }
+
+list_active_zones() {
+    info "== Dominios/Zonas DNS Activas (en $NAMED_LOCAL) =="
+    if [[ ! -f "$NAMED_LOCAL" ]]; then
+        echo "No se encontro el archivo $NAMED_LOCAL"
+        return
+    fi
+    grep "zone" "$NAMED_LOCAL" | cut -d'"' -f2 | sed 's/^/ - /' || echo "No hay zonas configuradas manualmente."
+}
