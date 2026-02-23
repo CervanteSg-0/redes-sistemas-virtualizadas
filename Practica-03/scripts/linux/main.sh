@@ -21,6 +21,7 @@ while true; do
   echo "3) Verificar estado del servicio DNS"
   echo "4) Eliminar dominio de la red"
   echo "5) Ver dominios configurados activos"
+  echo "6) Asignar IP estatica al servidor (Manual)"
   
   echo "0) Salir"
   echo "======================================="
@@ -32,6 +33,7 @@ while true; do
     3) service_status; pause ;;
     4) remove_zone_flow; warn "CONSEJO: Ejecuta 'ipconfig /flushdns' en el cliente Windows." ; pause ;;
     5) list_active_zones; pause ;;
+    6) manual_ip_flow; pause ;;
     0) exit 0 ;;
     *) echo "Opcion invalida"; pause ;;
   esac

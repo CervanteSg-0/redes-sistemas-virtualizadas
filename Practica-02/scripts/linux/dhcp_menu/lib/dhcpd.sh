@@ -28,13 +28,17 @@ reiniciar_servicio_dhcpd() {
   chown dhcpd:dhcpd "$lf" >/dev/null 2>&1 || chown root:root "$lf"
   chmod 664 "$lf" || true
 
+  # Intentar limpiar posibles conflictos de IP que bloqueen al demonio
   info "Habilitando y reiniciando servicio dhcpd..."
+  systemctl stop dhcpd >/dev/null 2>&1 || true
+  sleep 1
+
   systemctl enable dhcpd >/dev/null 2>&1 || true
   
-  # Intento de reinicio con reintento si falla (por si la red tarda en subir)
   if ! systemctl restart dhcpd; then
-    warn "Fallo primer intento de reinicio. Esperando 3 segundos a la red..."
-    sleep 3
+    warn "Fallo primer intento. Reajustando interfaz y reintentando..."
+    # A veces el demonio falla porque la IP no esta lista para 'bind'
+    sleep 2
     if ! systemctl restart dhcpd; then
        error "No pude reiniciar dhcpd. Revisa: journalctl -xeu dhcpd --no-pager | tail -n 80"
     fi
@@ -240,10 +244,16 @@ configurar_dhcp_interactivo() {
   # Asegurar IP temporal si la interfaz estaba sin IP (evita fallas raras)
   poner_ip_temporal_si_falta "$iface" "$(incrementar_ip "$red")" "$mask"
 
-  # Aplicar IP estatica definitiva del server en ens34 (NM)
+  # 1. Aplicar IP estatica definitiva del server en la interfaz PRIMERO
   aplicar_ip_estatica_servidor "$iface" "$ip_srv" "$mask" "$gw" "$dns1" "$dns2"
+  
+  info "Esperando a que la interfaz $iface suba con la nueva IP..."
+  sleep 2
+  
+  # Forzar subida si NM tarda
+  ip link set "$iface" up >/dev/null 2>&1 || true
 
-  # Lease file + sysconfig (Mageia INTERFACES)
+  # 2. Lease file + sysconfig (Mageia INTERFACES)
   lf="$(archivo_leases)"
   mkdir -p "$(dirname "$lf")" || true
   touch "$lf" || true

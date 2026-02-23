@@ -145,3 +145,43 @@ list_active_zones() {
     fi
     grep "zone" "$NAMED_LOCAL" | cut -d'"' -f2 | sed 's/^/ - /' || echo "No hay zonas configuradas manualmente."
 }
+
+manual_ip_flow() {
+    info "== Asignar IP Estatica Manualmente =="
+    local iface ip mask gw dns1
+    
+    echo "Interfaces disponibles:"
+    ip -o link show | awk -F': ' '{print $2}' | sed 's/@.*//' | grep -v '^lo$' | sed 's/^/ - /'
+    
+    read -r -p "Interfaz [ens34]: " iface
+    iface="${iface:-ens34}"
+    
+    ip="$(prompt_ip "IP Estatica para el servidor")"
+    mask="$(read -r -p "Mascara [255.255.255.0]: " m; echo "${m:-255.255.255.0}")"
+    gw="$(read -r -p "Puerta de enlace (opcional): " g; echo "$g")"
+    dns1="$(read -r -p "DNS Primario (opcional): " d; echo "$d")"
+    
+    info "Aplicando configuracion..."
+    # Usar nmcli para mayor persistencia
+    if command -v nmcli >/dev/null 2>&1; then
+        local con
+        con="$(nmcli -t -f NAME,DEVICE con show --active | awk -F: -v d="$iface" '$2==d{print $1; exit}')"
+        [[ -z "$con" ]] && con="$(nmcli -t -f NAME,DEVICE con show | awk -F: -v d="$iface" '$2==d{print $1; exit}')"
+        
+        if [[ -n "$con" ]]; then
+            nmcli con mod "$con" ipv4.method manual ipv4.addresses "$ip/24"
+            [[ -n "$gw" ]] && nmcli con mod "$con" ipv4.gateway "$gw"
+            [[ -n "$dns1" ]] && nmcli con mod "$con" ipv4.dns "$dns1"
+            nmcli con up "$con"
+            ok "Configuracion aplicada via nmcli."
+        else
+            warn "No se encontro conexion activa para $iface. Usando comando 'ip' (temporal)."
+            ip addr add "$ip/24" dev "$iface"
+            ip link set "$iface" up
+        fi
+    else
+        ip addr add "$ip/24" dev "$iface"
+        ip link set "$iface" up
+        ok "IP asignada (temporal, no se encontro nmcli)."
+    fi
+}
