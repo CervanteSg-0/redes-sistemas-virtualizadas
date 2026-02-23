@@ -23,6 +23,7 @@ install_bind_idempotent() {
 
   if is_bind_installed; then
     ok "BIND ya instalado."
+    configure_bind_global
     return 0
   fi
 
@@ -55,5 +56,29 @@ install_bind_idempotent() {
   fi
 
   systemctl enable --now "$SERVICE_NAME" >/dev/null 2>&1 || true
+  configure_bind_global
   ok "BIND instalado y servicio habilitado."
+}
+
+# Configura BIND para permitir consultas externas
+configure_bind_global() {
+  info "Configurando BIND para permitir consultas externas..."
+  
+  [[ -f "$NAMED_CONF" ]] || return 1
+  
+  # 1. Escuchar en todas las interfaces (quitar restricción de 127.0.0.1)
+  sed -i 's/listen-on port 53 { 127.0.0.1; };/listen-on port 53 { any; };/g' "$NAMED_CONF"
+  # 2. Escuchar en IPv6 (any)
+  sed -i 's/listen-on-v6 port 53 { ::1; };/listen-on-v6 port 53 { any; };/g' "$NAMED_CONF"
+  # 3. Permitir consultas desde cualquier IP
+  sed -i 's/allow-query\s*{ localhost; };/allow-query { any; };/g' "$NAMED_CONF"
+  
+  # Intentar abrir firewall si existe firewall-cmd
+  if have_cmd firewall-cmd; then
+     info "Abriendo puerto 53 en el firewall..."
+     firewall-cmd --add-service=dns --permanent >/dev/null 2>&1 || true
+     firewall-cmd --reload >/dev/null 2>&1 || true
+  fi
+
+  service_restart
 }

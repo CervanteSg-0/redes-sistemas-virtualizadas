@@ -34,6 +34,7 @@ warn() {
 pause() {
     echo ""
     echo "[PAUSE] Presiona ENTER para continuar..."
+    # redirection for read to work from stdin when backgrounded
     read -r
 }
 
@@ -157,9 +158,11 @@ manual_ip_flow() {
     iface="${iface:-ens34}"
     
     ip="$(prompt_ip "IP Estatica para el servidor")"
+    
+    echo -e "\e[33m[!] ADVERTENCIA: Si dejas la Puerta de Enlace vacía, podrías perder internet en la VM.\e[0m"
     mask="$(read -r -p "Mascara [255.255.255.0]: " m; echo "${m:-255.255.255.0}")"
-    gw="$(read -r -p "Puerta de enlace (opcional): " g; echo "$g")"
-    dns1="$(read -r -p "DNS Primario (opcional): " d; echo "$d")"
+    gw="$(read -r -p "Puerta de enlace (ENTER para omitir): " g; echo "$g")"
+    dns1="$(read -r -p "DNS Primario (ENTER para omitir): " d; echo "$d")"
     
     info "Aplicando configuracion..."
     # Usar nmcli para mayor persistencia
@@ -170,16 +173,26 @@ manual_ip_flow() {
         
         if [[ -n "$con" ]]; then
             nmcli con mod "$con" ipv4.method manual ipv4.addresses "$ip/24"
-            [[ -n "$gw" ]] && nmcli con mod "$con" ipv4.gateway "$gw"
-            [[ -n "$dns1" ]] && nmcli con mod "$con" ipv4.dns "$dns1"
+            if [[ -n "$gw" ]]; then
+                nmcli con mod "$con" ipv4.gateway "$gw"
+            else
+                nmcli con mod "$con" ipv4.gateway ""
+            fi
+            if [[ -n "$dns1" ]]; then
+                nmcli con mod "$con" ipv4.dns "$dns1"
+            else
+                nmcli con mod "$con" ipv4.dns ""
+            fi
             nmcli con up "$con"
             ok "Configuracion aplicada via nmcli."
         else
             warn "No se encontro conexion activa para $iface. Usando comando 'ip' (temporal)."
+            ip addr flush dev "$iface" >/dev/null 2>&1 || true
             ip addr add "$ip/24" dev "$iface"
             ip link set "$iface" up
         fi
     else
+        ip addr flush dev "$iface" >/dev/null 2>&1 || true
         ip addr add "$ip/24" dev "$iface"
         ip link set "$iface" up
         ok "IP asignada (temporal, no se encontro nmcli)."

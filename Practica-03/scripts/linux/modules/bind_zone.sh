@@ -91,8 +91,8 @@ ns1 IN  A   ${client_ip}
 www IN  CNAME @
 EOF
 
-  chmod 640 "$zone_file" || true
-  chown root:named "$zone_file" 2>/dev/null || true
+  chmod 644 "$zone_file" || true
+  chown root:named "$zone_file" 2>/dev/null || chown named:named "$zone_file" 2>/dev/null || true
   ok "Archivo de zona generado: $zone_file"
 }
 
