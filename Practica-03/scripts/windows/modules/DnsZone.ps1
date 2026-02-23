@@ -3,22 +3,31 @@
 . "$PSScriptRoot\Common.ps1"
 
 function Configure-DnsZone {
-    Write-Host "== Configurar Zona DNS (Windows Server) =="
-    $domain = (Read-Host "Dominio").Trim().ToLower()
-    $clientIp = Read-Host "IP del CLIENTE a la que apuntara el dominio"
-    $ttlSeconds = 3600 # Valor por defecto fijo
+    Write-Host "== Configurar Zona DNS + Registros (Windows) ==" -ForegroundColor White
     
+    $domain = (Read-Host "Dominio").Trim().ToLower()
     if ([string]::IsNullOrWhiteSpace($domain)) { die "Dominio no puede estar vacio." }
-    if (-not (valid_ipv4 $clientIp)) { die "IP de cliente invalida." }
 
-    # Configura la zona
-    Add-DnsServerPrimaryZone -Name $domain -ZoneFile "$domain.dns" -DynamicUpdate NonsecureAndSecure -ErrorAction Stop | Out-Null
+    $clientIp = prompt_ip "IP del CLIENTE a la que apuntara el dominio"
+    $ttlSeconds = 3600 # Valor por defecto fijo (1 hora)
+    
+    info "Configurando zona primaria: $domain"
+    try {
+        # Configura la zona (idempotente: si ya existe lanza error, lo manejamos)
+        Add-DnsServerPrimaryZone -Name $domain -ZoneFile "$domain.dns" -DynamicUpdate NonsecureAndSecure -ErrorAction Stop | Out-Null
+        
+        info "Agregando registros base..."
+        # Agregar registros A (IP)
+        Add-DnsServerResourceRecordA -ZoneName $domain -Name "@" -IPv4Address $clientIp -TimeToLive ([TimeSpan]::FromSeconds($ttlSeconds)) -ErrorAction Stop | Out-Null
 
-    # Agregar registros A (IP)
-    Add-DnsServerResourceRecordA -ZoneName $domain -Name "@" -IPv4Address $clientIp -TimeToLive ([TimeSpan]::FromSeconds($ttlSeconds)) -ErrorAction Stop | Out-Null
+        # Agregar registros CNAME (www)
+        Add-DnsServerResourceRecordCName -ZoneName $domain -Name "www" -HostNameAlias "$domain." -TimeToLive ([TimeSpan]::FromSeconds($ttlSeconds)) -ErrorAction Stop | Out-Null
 
-    # Agregar registros CNAME (www)
-    Add-DnsServerResourceRecordCName -ZoneName $domain -Name "www" -HostNameAlias "$domain." -TimeToLive ([TimeSpan]::FromSeconds($ttlSeconds)) -ErrorAction Stop | Out-Null
+        # Sincronizar lista para el cliente
+        Update-SharedDomainsList
 
-    Write-Host "[OK] Zona y registros configurados: $domain"
+        ok "Zona y registros configurados exitosamente: $domain (-> $clientIp)"
+    } catch {
+        warn "La zona '$domain' ya existe o hubo un error. Revisa con la opcion 5."
+    }
 }

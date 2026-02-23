@@ -8,15 +8,19 @@
 . "$PSScriptRoot\modules\DnsRemove.ps1"
 
 while ($true) {
-    Write-Host "===== Menu de Configuracion ====="
-    Write-Host "1) Instalar DNS"
-    Write-Host "2) Configurar DNS y Dominio"
+    Clear-Host
+    Write-Host "===== DNS CONFIGURACION (Windows) =====" -ForegroundColor Cyan
+    Show-ServerIPInfo
+    Write-Host "1) Instalar Servidor DNS"
+    Write-Host "2) Configurar Zona y Dominio"
     Write-Host "3) Verificar estado del servicio DNS"
     Write-Host "4) Eliminar dominio de la red"
     Write-Host "5) Ver dominios configurados activos"
+    Write-Host "6) Asignar IP estatica al servidor (Manual)"
     Write-Host "0) Salir"
+    Write-Host "======================================="
     
-    $op = Read-Host "Seleccione una opcion"
+    $op = Read-Host "Opcion"
 
     switch ($op) {
         "1" { 
@@ -33,18 +37,23 @@ while ($true) {
         }
         "4" { 
             Remove-DnsZoneByName
-            Write-Host "CONSEJO: Ejecuta 'ipconfig /flushdns' en el cliente para limpiar la cache." -ForegroundColor Yellow
+            warn "CONSEJO: Ejecuta 'ipconfig /flushdns' en el cliente para limpiar la cache."
             pause
         }
         "5" {
             Get-ActiveZones
             pause
         }
+        "6" {
+            Manual-IPFlow
+            pause
+        }
         "0" { 
-            break
+            exit
         }
         default { 
-            Write-Host "Opcion no valida" 
+            warn "Opcion no valida. Intenta de nuevo."
+            Start-Sleep -Seconds 1
         }
     }
 }

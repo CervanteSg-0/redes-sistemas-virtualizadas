@@ -3,13 +3,14 @@
 . "$PSScriptRoot\Common.ps1"
 
 function Install-DnsRole {
-    Write-Host "== Instalando DNS Server (Windows Server) =="
+    Write-Host "== Instalando DNS Server (Windows Server) ==" -ForegroundColor White
     $feat = Get-WindowsFeature DNS
     if ($feat.Installed) {
-        Write-Host "[OK] DNS ya esta instalado."
+        ok "DNS ya esta instalado."
         return
     }
     
+    info "Instalando caracteristica DNS..."
     Install-WindowsFeature DNS -IncludeManagementTools | Out-Null
-    Write-Host "[OK] DNS instalado."
+    ok "DNS instalado correctamente."
 }
