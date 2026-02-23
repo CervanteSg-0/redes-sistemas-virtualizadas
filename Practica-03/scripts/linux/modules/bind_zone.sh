@@ -8,8 +8,6 @@ source "$MOD_DIR/bind_install.sh"
 DOMAIN_DEFAULT="reprobados.com"
 TTL_DEFAULT=300
 
-NAMED_CONF="/etc/named.conf"
-NAMED_LOCAL="/etc/named.conf.local"
 ZONE_DIR_CANDIDATES=(
   "/var/lib/named/var/named"
   "/var/named"
@@ -42,11 +40,11 @@ remove_zone_block_named_local() {
   local tmp
   tmp="$(mktemp)"
 
-  # elimina el bloque: zone "domain" IN { ... };
+  # elimina el bloque: zone "domain" ... { ... };
   awk -v dom="$domain" '
     BEGIN{inblk=0}
-    $0 ~ "zone \""dom"\"" {inblk=1; next}
-    inblk && $0 ~ /^\};/ {inblk=0; next}
+    $0 ~ "zone \""dom"\"" && $0 ~ "{" {inblk=1; next}
+    inblk && $0 ~ /^\s*\};/ {inblk=0; next}
     inblk {next}
     {print}
   ' "$NAMED_LOCAL" > "$tmp"

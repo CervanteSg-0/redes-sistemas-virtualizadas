@@ -1,32 +1,38 @@
 #!/usr/bin/env bash
 
+# Global Variables
+SERVICE_NAME="named"
+NAMED_CONF="/etc/named.conf"
+NAMED_LOCAL="/etc/named.conf.local"
+
 # Función para terminar el script con un mensaje de error
 die() {
     local msg="$1"
-    echo "[ERROR] $msg"
+    echo -e "\e[31m[ERROR] $msg\e[0m"
     exit 1
 }
 
 # Función para mostrar mensajes de información
 info() {
     local msg="$1"
-    echo "[INFO] $msg"
+    echo -e "\e[34m[INFO] $msg\e[0m"
 }
 
 # Función para mostrar mensajes de éxito
 ok() {
     local msg="$1"
-    echo "[OK] $msg"
+    echo -e "\e[32m[OK] $msg\e[0m"
 }
 
 # Función para mostrar advertencias
 warn() {
     local msg="$1"
-    echo "[WARN] $msg"
+    echo -e "\e[33m[WARN] $msg\e[0m"
 }
 
 # Función para pausar la ejecución y esperar la entrada del usuario
 pause() {
+    echo ""
     echo "[PAUSE] Presiona ENTER para continuar..."
     read -r
 }
@@ -47,13 +53,14 @@ valid_ipv4() {
 # Leer IP con validación
 prompt_ip() {
     local label="$1"
+    local ip
     while true; do
-        read -r ip
+        read -r -p "$label : " ip
         if valid_ipv4 "$ip"; then
             echo "$ip"
             return 0
         else
-            echo "IP inválida. Ejemplo de formato correcto: 192.168.100.50"
+            echo "  IP inválida. Ejemplo de formato correcto: 192.168.100.50"
         fi
     done
 }
@@ -61,22 +68,26 @@ prompt_ip() {
 # Confirmación de respuesta S/N
 prompt_yesno() {
     local label="$1"
-    local defaultYes="$2"
+    local defaultYes="${2:-true}"
     local suffix
     if [ "$defaultYes" = true ]; then
         suffix="[S/n]"
     else
         suffix="[s/N]"
     fi
+    
+    local response
     while true; do
-        read -r response
-        response="${response:-$defaultYes}"
+        read -r -p "$label $suffix: " response
+        if [[ -z "$response" ]]; then
+            if [ "$defaultYes" = true ]; then return 0; else return 1; fi
+        fi
         if [[ "$response" =~ ^(s|si|y|yes)$ ]]; then
             return 0
         elif [[ "$response" =~ ^(n|no)$ ]]; then
             return 1
         else
-            echo "$label $suffix"
+            echo "  Responde S o N."
         fi
     done
 }
@@ -94,5 +105,34 @@ valid_fqdn_zone() {
         return 0
     else
         return 1
+    fi
+}
+
+service_restart() {
+    info "Reiniciando servicio $SERVICE_NAME..."
+    systemctl restart "$SERVICE_NAME" || warn "No se pudo reiniciar $SERVICE_NAME"
+}
+
+show_listen_53() {
+    info "== Puertos escuchando 53 (DNS) =="
+    if command -v ss >/dev/null 2>&1; then
+        ss -tunlp | grep :53 || echo "Nada escuchando en el puerto 53"
+    elif command -v netstat >/dev/null 2>&1; then
+        netstat -tunlp | grep :53 || echo "Nada escuchando en el puerto 53"
+    else
+        echo "No se encontro 'ss' ni 'netstat' para verificar puertos."
+    fi
+}
+
+service_status() {
+    info "== Estado del servicio $SERVICE_NAME =="
+    systemctl --no-pager -l status "$SERVICE_NAME" || true
+    echo ""
+    show_listen_53
+}
+
+check_root() {
+    if [[ $EUID -ne 0 ]]; then
+        die "Este script debe ejecutarse como root (sudo)."
     fi
 }

@@ -10,6 +10,8 @@ source "$BASE_DIR/modules/bind_zone.sh"
 source "$BASE_DIR/modules/bind_status.sh"
 source "$BASE_DIR/modules/bind_remove.sh"
 
+check_root
+
 
 while true; do
   clear || true

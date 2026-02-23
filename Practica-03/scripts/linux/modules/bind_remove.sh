@@ -34,7 +34,7 @@ remove_zone_flow() {
   echo " - Se removerá el bloque en: $NAMED_LOCAL"
   echo " - Se intentará borrar el archivo db.${domain}"
   echo ""
-  prompt_yesno "¿Confirmas eliminar '$domain'?" "n" || { info "Cancelado."; return 0; }
+  prompt_yesno "¿Confirmas eliminar '$domain'?" false || { info "Cancelado."; return 0; }
 
   install_bind_idempotent
   ensure_named_local_included

@@ -4,8 +4,6 @@ set -euo pipefail
 MOD_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$MOD_DIR/common.sh"
 
-SERVICE_NAME="named"
-
 # Verifica si BIND está instalado
 is_bind_installed() {
   rpm -q bind >/dev/null 2>&1 || rpm -q bind9 >/dev/null 2>&1
