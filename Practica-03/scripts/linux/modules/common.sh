@@ -115,20 +115,43 @@ service_restart() {
 }
 
 show_listen_53() {
-    info "== Puertos escuchando 53 (DNS) =="
+    echo -e "\n== Puertos escuchando 53 (DNS) =="
+    printf "%-40s %-10s %-10s\n" "LocalAddress" "LocalPort" "State"
+    printf "%-40s %-10s %-10s\n" "------------" "---------" "-----"
+    
     if command -v ss >/dev/null 2>&1; then
-        ss -tunlp | grep :53 || echo "Nada escuchando en el puerto 53"
-    elif command -v netstat >/dev/null 2>&1; then
-        netstat -tunlp | grep :53 || echo "Nada escuchando en el puerto 53"
+        # Extraemos la IP y el puerto de ss, manejando IPv4 e IPv6
+        ss -tunlp | grep ":53 " | awk '{
+            split($5, a, ":");
+            port = a[length(a)];
+            address = "";
+            for(i=1; i<length(a); i++) address = (address=="" ? a[i] : address ":" a[i]);
+            if(address == "*") address = "0.0.0.0";
+            if(address == "[::]") address = "::";
+            printf "%-40s %-10s %-10s\n", address, port, "Listen"
+        }' | sort -u
     else
-        echo "No se encontro 'ss' ni 'netstat' para verificar puertos."
+        echo "No se encontró 'ss' para el reporte detallado."
     fi
 }
 
 service_status() {
-    info "== Estado del servicio $SERVICE_NAME =="
-    systemctl --no-pager -l status "$SERVICE_NAME" || true
-    echo ""
+    echo -e "\n== Estado del servicio DNS =="
+    printf "%-10s %-10s %-25s %-15s\n" "Status" "Name" "DisplayName" "StartType"
+    printf "%-10s %-10s %-25s %-15s\n" "------" "----" "-----------" "---------"
+    
+    local status="Stopped"
+    if systemctl is-active --quiet "$SERVICE_NAME"; then
+        status="Running"
+    fi
+    
+    local enabled="Disabled"
+    if systemctl is-enabled --quiet "$SERVICE_NAME" 2>/dev/null; then
+        enabled="Automatic"
+    fi
+
+    printf "%-10s %-10s %-25s %-15s\n" "$status" "DNS" "DNS Server (BIND)" "$enabled"
+    
     show_listen_53
 }
 
