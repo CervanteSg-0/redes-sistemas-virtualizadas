@@ -71,10 +71,10 @@ configure_bind_global() {
 
   # 1. Escuchar en todas las interfaces (quitar restricción de 127.0.0.1)
   # Usamos una expresión más libre por si hay espacios extra
-  sed -i 's/listen-on port 53 {[^;]*;};/listen-on port 53 { any; };/g' "$NAMED_CONF"
+  sed -i 's/listen-on port 53\s*{[^;]*;};/listen-on port 53 { any; };/g' "$NAMED_CONF"
   
   # 2. Escuchar en IPv6 (any)
-  sed -i 's/listen-on-v6 port 53 {[^;]*;};/listen-on-v6 port 53 { any; };/g' "$NAMED_CONF"
+  sed -i 's/listen-on-v6 port 53\s*{[^;]*;};/listen-on-v6 port 53 { any; };/g' "$NAMED_CONF"
   
   # 3. Permitir consultas desde cualquier IP
   sed -i 's/allow-query\s*{[^;]*;};/allow-query { any; };/g' "$NAMED_CONF"
