@@ -69,22 +69,19 @@ configure_bind_global() {
   # Backup de seguridad
   cp "$NAMED_CONF" "${NAMED_CONF}.bak" || true
 
-  # 1. Escuchar en todas las interfaces (quitar restricción de 127.0.0.1)
-  # Usamos una expresión más libre por si hay espacios extra
-  sed -i 's/listen-on port 53\s*{[^;]*;};/listen-on port 53 { any; };/g' "$NAMED_CONF"
+  # 1. Escuchar en todas las interfaces (IPv4)
+  sed -i 's/listen-on[[:space:]]\+port[[:space:]]\+53[[:space:]]*{[[:space:]]*[^;]\+;[[:space:]]*};/listen-on port 53 { any; };/g' "$NAMED_CONF"
   
-  # 2. Escuchar en IPv6 (any)
-  sed -i 's/listen-on-v6 port 53\s*{[^;]*;};/listen-on-v6 port 53 { any; };/g' "$NAMED_CONF"
+  # 2. Escuchar en IPv6
+  sed -i 's/listen-on-v6[[:space:]]\+port[[:space:]]\+53[[:space:]]*{[[:space:]]*[^;]\+;[[:space:]]*};/listen-on-v6 port 53 { any; };/g' "$NAMED_CONF"
   
-  # 3. Permitir consultas desde cualquier IP
-  sed -i 's/allow-query\s*{[^;]*;};/allow-query { any; };/g' "$NAMED_CONF"
+  # 3. Permitir consultas desde cualquier IP (allow-query)
+  sed -i 's/allow-query[[:space:]]*{[[:space:]]*[^;]\+;[[:space:]]*};/allow-query { any; };/g' "$NAMED_CONF"
 
   # 4. Ajustes adicionales para laboratorios (DNSSEC)
-  # A veces DNSSEC impide que zonas locales funcionen si no están firmadas
-  if grep -q "dnssec-validation" "$NAMED_CONF"; then
-      sed -i 's/dnssec-validation yes;/dnssec-validation no;/g' "$NAMED_CONF"
-      info "Validacion DNSSEC desactivada para compatibilidad local."
-  fi
+  # Buscamos tanto "yes" como "auto" y lo pasamos a "no"
+  sed -i 's/dnssec-validation[[:space:]]\+\(yes\|auto\);/dnssec-validation no;/g' "$NAMED_CONF"
+  info "Validacion DNSSEC desactivada para evitar Timeouts en red local."
   
   # Intentar abrir firewall si existe firewall-cmd
   if have_cmd firewall-cmd; then
