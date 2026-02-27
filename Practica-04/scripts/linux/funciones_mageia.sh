@@ -17,7 +17,7 @@ pausa_tecla() {
 instalar_paquete() {
     local paquete=$1
     echo "Verificando/Instalando paquete: $paquete"
-    if ! rpm -qa | grep -q "^$paquete-"; then
+    if ! rpm -q "$paquete" > /dev/null 2>&1; then
         dnf install -y "$paquete"
     else
         echo "El paquete $paquete ya se encuentra instalado."
