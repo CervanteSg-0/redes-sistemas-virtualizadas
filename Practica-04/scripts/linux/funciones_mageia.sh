@@ -5,7 +5,7 @@
 # Variables
 ZONAS_DNS="/var/named/zones"
 CONF_DNS="/etc/named.conf"
-CONF_DHCP="/etc/dhcp/dhcpd.conf"
+CONF_DHCP="/etc/dhcpd.conf"
 DHCP_PKG="dhcp-server"
 
 # Funciones de utilidad
