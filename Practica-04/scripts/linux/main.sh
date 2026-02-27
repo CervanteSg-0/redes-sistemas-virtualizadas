@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# ==========================================
-# SCRIPT PRINCIPAL PARA MAGEIA LINUX
-# ==========================================
+# ------------------------------------------
+#             MAGEIA SERVER
+# ------------------------------------------
 
 # Carga de funciones modulares
 source ./funciones_mageia.sh
