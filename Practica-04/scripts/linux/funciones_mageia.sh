@@ -117,21 +117,28 @@ configurar_ambito_dhcp() {
         iface_map[$i]=$iface
         ((i++))
     done
-    read -p "Seleccione numero para aplicar: " num_if
-    INTERFAZ=${iface_map[$num_if]}
+    read -p "Seleccione numero para aplicar (o el nombre exacto): " num_if
+    
+    # Validar si ingreso el nombre directo
+    if [[ " $ifs " =~ " $num_if " ]]; then
+        INTERFAZ=$num_if
+    else
+        INTERFAZ=${iface_map[$num_if]}
+    fi
 
     if [ -z "$INTERFAZ" ]; then
-        echo -e "\e[1;31mInterfaz descartada.\e[0m"
+        echo -e "\e[1;31mInterfaz descartada. Opcion invalida.\e[0m"
         pausa_tecla
         return
     fi
     
     read -p "  Direccion IP de Red (Ej. 192.168.10.0): " RED_IP
-    read -p "  Mascara Subred (Ej. 255.255.255.0): " MASCARA
+    read -p "  Mascara Subred (Defecto: 255.255.255.0): " MASCARA
+    MASCARA=${MASCARA:-255.255.255.0}
     read -p "  Rango Inicial para Clientes: " RANGO_INI
     read -p "  Rango Final para Clientes: " RANGO_FIN
-    read -p "  Puerta de Enlace (Router): " GATEWAY
-    read -p "  Servidor DNS (Primario): " DNS_IP
+    read -p "  Puerta de Enlace (Router) [Opcional]: " GATEWAY
+    read -p "  Servidor DNS (Primario) [Opcional]: " DNS_IP
     read -p "  Tiempo de Concesion (Defecto: 600): " TIEMPO
     TIEMPO=${TIEMPO:-600}
 
@@ -139,7 +146,7 @@ configurar_ambito_dhcp() {
     read -p "Desea fijar la IP Base para el Servidor? (s/n): " FIJAR
     if [ "${FIJAR^^}" == "S" ]; then
         read -p "  IP Estatica del Server en $INTERFAZ: " IP_SERVER
-        read -p "  Prefijo en CIDR (Ej. 24): " CIDR
+        read -p "  Prefijo en CIDR (Ej. 24 para 255.255.255.0 ó 16 para 255.255.0.0): " CIDR
         
         ip addr flush dev "$INTERFAZ"
         ip addr add "$IP_SERVER/$CIDR" dev "$INTERFAZ"
@@ -149,7 +156,14 @@ configurar_ambito_dhcp() {
     echo "Respaldando anterior configuracion..."
     [ ! -f $CONF_DHCP.bak ] && cp $CONF_DHCP $CONF_DHCP.bak 2>/dev/null
 
-    echo "Generando archivo final de zonas..."
+    echo "Generando archivo de configuracion dhcpd.conf..."
+    
+    # Preparar sintaxis para opciones opcionales para evitar errores
+    OPCION_ROUTER=""
+    OPCION_DNS=""
+    [ -n "$GATEWAY" ] && OPCION_ROUTER="    option routers $GATEWAY;"
+    [ -n "$DNS_IP" ] && OPCION_DNS="    option domain-name-servers $DNS_IP;"
+
     cat <<EOF > $CONF_DHCP
 # Configuracion DHCP generada via Gestor de Mageia
 default-lease-time $TIEMPO;
@@ -158,20 +172,27 @@ authoritative;
 
 subnet $RED_IP netmask $MASCARA {
     range $RANGO_INI $RANGO_FIN;
-    option routers $GATEWAY;
-    option domain-name-servers $DNS_IP;
+$OPCION_ROUTER
+$OPCION_DNS
 }
 EOF
 
-    # Aplicar a una interfaz predeterminada en systemd o sysconfig
-    if [ -f /etc/sysconfig/dhcpd ]; then
-        sed -i "s/^DHCPD_INTERFACE=.*/DHCPD_INTERFACE=\"$INTERFAZ\"/" /etc/sysconfig/dhcpd
-    elif echo 'DHCPDARGS="'$INTERFAZ'"' >> /etc/sysconfig/dhcpd 2>/dev/null; then
-        echo "Interfaz registrada"
+    # Registrar la interfaz en sysconfig para el servicio (necesario en Mageia)
+    mkdir -p /etc/sysconfig
+    if grep -q "^DHCPDARGS" /etc/sysconfig/dhcpd 2>/dev/null; then
+        sed -i "s/^DHCPDARGS.*/DHCPDARGS=\"$INTERFAZ\"/" /etc/sysconfig/dhcpd
+    else
+        echo "DHCPDARGS=\"$INTERFAZ\"" >> /etc/sysconfig/dhcpd
     fi
 
+    echo -e "\n\e[1;33m[*] Iniciando DHCP. Si falla, asegurate de que la interfaz '$INTERFAZ' tenga una IP estatica dentro de la red que acabas de configurar.\e[0m"
     systemctl restart dhcpd
-    echo -e "\e[1;32mAmbito configurado y DHCPD corriendo.\e[0m"
+    
+    if systemctl is-active --quiet dhcpd; then
+        echo -e "\e[1;32mAmbito configurado y DHCPD corriendo correctamente.\e[0m"
+    else
+        echo -e "\e[1;31m[!] Falla al iniciar el servicio DHCP. Ejecuta 'systemctl status dhcpd' para ver detalles.\e[0m"
+    fi
     pausa_tecla
 }
 
