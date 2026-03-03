@@ -1,6 +1,6 @@
 <#
-    Practica-05: Automatización de Servidor FTP en Windows Server 2022
-    Objetivo: Instalación, Gestión de Usuarios y Permisos Segmentados.
+    Practica-05: Administracion de Servidor FTP en Windows Server 2022
+    
 #>
 
 Import-Module WebAdministration
@@ -68,6 +68,10 @@ Function Setup-FTPSite {
     # Reglas de Autorización Globales
     Add-WebConfigurationProperty -Filter "/system.ftpServer/security/authorization" -Name "." -Value @{accessType="Allow"; users="*"; permissions="Read, Write"} -PSPath "IIS:\Sites\FTP_Practica05"
     
+    # Abrir Firewall de Windows
+    Write-Host "[*] Abriendo Firewall de Windows para FTP..." -ForegroundColor Cyan
+    New-NetFirewallRule -DisplayName "FTP Servidor" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 21, 1024-65535 -ErrorAction SilentlyContinue
+
     Restart-WebItem "IIS:\Sites\FTP_Practica05"
 }
 
@@ -77,9 +81,19 @@ Function Add-FTPUsers {
     
     for ($i = 1; $i -le $n; $i++) {
         $user = Read-Host "Nombre para el usuario $i"
-        $pass = Read-Host "Password para $user" -AsSecureString
-        $groupName = Read-Host "Grupo (1: reprobados, 2: recursadores)"
+        # Validar contraseña de exactamente 8 caracteres
+        $passString = ""
+        while ($true) {
+            $passString = Read-Host "Password para $user (deben ser 8 caracteres)"
+            if ($passString.Length -eq 8) {
+                $pass = ConvertTo-SecureString $passString -AsPlainText -Force
+                break
+            } else {
+                Write-Host "[-] ERROR: La contraseña debe tener exactamente 8 caracteres." -ForegroundColor Red
+            }
+        }
         
+        $groupName = Read-Host "Grupo (1: reprobados, 2: recursadores)"
         $targetGroup = if ($groupName -eq "1") { "reprobados" } else { "recursadores" }
 
         # Crear Usuario Local
@@ -134,22 +148,84 @@ Function Change-UserGroup {
     }
 }
 
-# MENU PRINCIPAL
-cls
-Write-Host "--- PRACTICA 05: FTP AUTOMATION (WINDOWS SERVER) ---" -ForegroundColor Cyan
-Write-Host "1. Instalación y Configuración Inicial"
-Write-Host "2. Alta Masiva de Usuarios"
-Write-Host "3. Cambiar de Grupo a Usuario"
-Write-Host "4. Salir"
-
-$choice = Read-Host "Seleccione una opción"
-
-switch ($choice) {
-    "1" { Install-FTPServer; Initialize-Environment; Setup-FTPSite }
-    "2" { 
-        $count = Read-Host "Cuantos usuarios desea crear?"
-        Add-FTPUsers -n $count
+# 6. Listar Usuarios Registrados
+Function Get-RegisteredFTPUsers {
+    Write-Host ""
+    Write-Host "[*] USUARIOS REGISTRADOS EN EL SISTEMA FTP" -ForegroundColor Cyan
+    Write-Host "------------------------------------------"
+    Write-Host "{0,-20} {1,-20}" -f "USUARIO", "GRUPO"
+    Write-Host "{0,-20} {1,-20}" -f "-------", "-----"
+    
+    $groups = @("reprobados", "recursadores")
+    foreach ($g in $groups) {
+        $members = Get-LocalGroupMember -Group $g -ErrorAction SilentlyContinue
+        foreach ($m in $members) {
+            Write-Host "{0,-20} {1,-20}" -f $m.Name, $g
+        }
     }
-    "3" { Change-UserGroup }
-    "4" { exit }
+    Write-Host "------------------------------------------"
+    Read-Host "Presione Enter para continuar..."
+}
+
+# 7. Login Simulado
+Function Test-UserLogin {
+    Write-Host ""
+    Write-Host "--- INICIO DE SESIÓN ---" -ForegroundColor Cyan
+    $user = Read-Host "Nombre de usuario"
+    
+    if (Get-LocalUser -Name $user -ErrorAction SilentlyContinue) {
+        # Verificar si es parte de los grupos involucrados
+        $groups = Get-LocalGroup -Name reprobados, recursadores -ErrorAction SilentlyContinue | Get-LocalGroupMember -Member $user -ErrorAction SilentlyContinue
+        
+        if ($null -eq $groups) {
+            Write-Host "[-] El usuario existe pero no pertenece a los grupos de la práctica." -ForegroundColor Red
+            return
+        }
+
+        $passString = Read-Host "Contraseña"
+        
+        # Simulación de validación (basada en longitud como en el script de Linux)
+        if ($passString.Length -eq 8) {
+            Write-Host "[+] ¡Login exitoso! Bienvenido, $user." -ForegroundColor Green
+            Write-Host "[*] Tus carpetas FTP vinculadas:"
+            if (Test-Path "C:\ftp_root\LocalUser\$user") {
+                Get-ChildItem -Path "C:\ftp_root\LocalUser\$user" | Select-Object Name
+            }
+        } else {
+            Write-Host "[-] Contraseña incorrecta o formato inválido (debe ser de 8 caracteres)." -ForegroundColor Red
+        }
+    } else {
+        Write-Host "[-] Usuario no encontrado." -ForegroundColor Red
+    }
+    Read-Host "Presione Enter para continuar..."
+}
+
+# MENU PRINCIPAL
+while ($true) {
+    cls
+    Write-Host "====================================================" -ForegroundColor Cyan
+    Write-Host "   PRACTICA 05: FTP AUTOMATION (WINDOWS SERVER)     " -ForegroundColor Cyan
+    Write-Host "====================================================" -ForegroundColor Cyan
+    Write-Host "1. Instalación y Configuración Inicial"
+    Write-Host "2. Alta Masiva de Usuarios (Password 8 chars)"
+    Write-Host "3. Ver Usuarios Registrados"
+    Write-Host "4. Cambiar de Grupo a Usuario"
+    Write-Host "5. Login de Usuario (Simulado)"
+    Write-Host "6. Salir"
+    Write-Host "====================================================" -ForegroundColor Cyan
+
+    $choice = Read-Host "Seleccione una opción"
+
+    switch ($choice) {
+        "1" { Install-FTPServer; Initialize-Environment; Setup-FTPSite }
+        "2" { 
+            $count = Read-Host "Cuantos usuarios desea crear?"
+            if ($count -as [int]) { Add-FTPUsers -n ([int]$count) }
+        }
+        "3" { Get-RegisteredFTPUsers }
+        "4" { Change-UserGroup }
+        "5" { Test-UserLogin }
+        "6" { Write-Host "Saliendo..."; exit }
+        Default { Write-Host "Opción no válida."; Start-Sleep -Seconds 1 }
+    }
 }
