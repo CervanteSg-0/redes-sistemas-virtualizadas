@@ -1,7 +1,8 @@
-#!/bin/bash
-
-# Practica-05: Automatización de Servidor FTP en Linux (Mageia)
-# Objetivo: Instalación de vsftpd y Configuración de permisos con Bind Mounts.
+# 0. Check Root
+if [[ $EUID -ne 0 ]]; then
+   echo "[-] Este script debe ejecutarse como root (use sudo)." 
+   exit 1
+fi
 
 # 1. Instalación e Idempotencia
 install_vsftpd() {
@@ -69,7 +70,8 @@ config_vsftpd() {
     # Asegurarse de que el directorio del chroot seguro exista
     mkdir -p /var/run/vsftpd/empty
 
-    cat <<EOF > /etc/vsftpd.conf
+    # Definir el contenido de la configuración
+    CONF_CONTENT=$(cat <<EOF
 # Configuracion Practica 05
 listen=YES
 listen_ipv6=NO
@@ -98,9 +100,18 @@ pasv_max_port=40100
 # SSL Desactivado
 ssl_enable=NO
 EOF
+)
+
+    # Escribir en ambas rutas posibles para asegurar compatibilidad
+    echo "$CONF_CONTENT" > /etc/vsftpd.conf
+    if [ -d "/etc/vsftpd" ]; then
+        echo "$CONF_CONTENT" > /etc/vsftpd/vsftpd.conf
+    fi
+
     systemctl restart vsftpd
     systemctl enable vsftpd
-    echo "[+] Configuración aplicada. Reinicie su cliente de FileZilla e intente de nuevo."
+    echo "[+] Configuración aplicada y servicio reiniciado."
+    echo "[!] IMPORTANTE: Si sigue viendo el error 500 OOPS, asegúrese de que el servicio esté corriendo con: systemctl status vsftpd"
 }
 
 # 4. Gestión de Usuarios y Bind Mounts
