@@ -215,14 +215,17 @@ while ($true) {
     switch ($choice) {
         "1" { Install-FTPServer; Initialize-Environment; Setup-FTPSite }
         "2" { 
-            $count = Read-Host "Cuantos usuarios desea crear?"
-            if ($count -as [int]) { Add-FTPUsers -n ([int]$count) }
+            $countSelect = Read-Host "Cuantos usuarios desea crear?"
+            if ($countSelect -as [int]) { Add-FTPUsers -n ([int]$countSelect) }
         }
         "3" { Get-RegisteredFTPUsers }
         "4" { Change-UserGroup }
         "5" { Remove-FTPUser }
         "6" { Test-UserLogin }
         "7" { Write-Host "Saliendo..."; exit }
-        Default { Write-Host "Opcion no valida."; Start-Sleep -Seconds 1 }
+        Default { Write-Host "Opcion no valida."; Start-Sleep -Seconds 1; continue }
     }
+    
+    Write-Host ""
+    Read-Host "Presione Enter para volver al menu..."
 }

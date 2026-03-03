@@ -303,6 +303,9 @@ while true; do
         5) delete_user ;;
         6) login_user ;;
         7) echo "Saliendo..."; exit 0 ;;
-        *) echo "Opcion no valida."; sleep 1 ;;
+        *) echo "Opcion no valida."; sleep 1; continue ;;
     esac
+    
+    echo ""
+    read -p "Presione Enter para volver al menu..."
 done
