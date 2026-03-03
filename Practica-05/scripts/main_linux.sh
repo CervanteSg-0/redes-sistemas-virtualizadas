@@ -7,8 +7,19 @@
 install_vsftpd() {
     echo "[*] Verificando e Instalando vsftpd..."
     if ! rpm -q vsftpd > /dev/null; then
+        echo "[*] Sincronizando repositorios (esto puede tardar un momento)..."
+        urpmi.update -a
+        echo "[*] Intentando instalar vsftpd..."
         urpmi vsftpd --auto
-        echo "[+] vsftpd instalado."
+        
+        if [ $? -ne 0 ]; then
+            echo "[-] ERROR: No se pudo encontrar o instalar el paquete 'vsftpd'."
+            echo "    Intente ejecutar: urpmi --auto-update"
+            exit 1
+        fi
+        echo "[+] vsftpd instalado exitosamente."
+    else
+        echo "[!] vsftpd ya está instalado."
     fi
 }
 
