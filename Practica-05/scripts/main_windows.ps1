@@ -7,9 +7,10 @@ Import-Module WebAdministration
 # 1. Instalacion e Idempotencia
 Function Install-FTPServer {
     Write-Host "[*] Verificando e Instalando Rol FTP..." -ForegroundColor Cyan
-    $features = @("Web-Server", "Web-Ftp-Server", "Web-Ftp-Service", "Web-Mgmt-Console")
+    # Instalamos todos los componentes necesarios para evitar secciones bloqueadas o faltantes
+    $features = @("Web-Server", "Web-Ftp-Server", "Web-Ftp-Service", "Web-Ftp-Ext", "Web-Mgmt-Console")
     foreach ($f in $features) {
-        if (!(Get-WindowsFeature $f).Installed) {
+        if (!(Get-WindowsFeature $f -ErrorAction SilentlyContinue).Installed) {
             Install-WindowsFeature $f
             Write-Host "[+] Instalado: $f" -ForegroundColor Green
         }
@@ -48,18 +49,27 @@ Function Initialize-Environment {
 
 # 3. Configuracion del Sitio FTP en IIS
 Function Setup-FTPSite {
+    Write-Host "[*] Desbloqueando secciones de configuracion IIS..." -ForegroundColor Cyan
+    # Estos comandos corrigen el error de "seccion bloqueada" (locked section)
+    # Permiten configurar autenticacion y autorizacion a nivel de sitio
+    $appcmd = "$env:windir\system32\inetsrv\appcmd.exe"
+    & $appcmd unlock config /section:system.ftpServer/security/authentication
+    & $appcmd unlock config /section:system.ftpServer/security/authorization
+
     Write-Host "[*] Configurando Sitio FTP en IIS..." -ForegroundColor Cyan
     
-    if (Test-Path "IIS:\Sites\FTP_Practica05") {
-        Remove-WebFtpSite -Name "FTP_Practica05"
+    # Eliminar sitio si existe de forma segura
+    if (Get-Website -Name "FTP_Practica05" -ErrorAction SilentlyContinue) {
+        Remove-Website -Name "FTP_Practica05"
     }
     
+    # Usar New-WebFtpSite (requiere WebAdministration e IIS activo)
     New-WebFtpSite -Name "FTP_Practica05" -Port 21 -PhysicalPath "C:\ftp_root" -Force
     
     # Habilitar Aislamiento de Usuarios
     Set-ItemProperty "IIS:\Sites\FTP_Practica05" -Name ftpServer.userIsolation.mode -Value "IsolateUsers"
     
-    # Configurar Autenticacion
+    # Configurar Autenticacion (Basica y Anonima)
     Set-WebConfigurationProperty -Filter "/system.ftpServer/security/authentication/basicAuthentication" -Name "enabled" -Value $true -PSPath "IIS:\Sites\FTP_Practica05"
     Set-WebConfigurationProperty -Filter "/system.ftpServer/security/authentication/anonymousAuthentication" -Name "enabled" -Value $true -PSPath "IIS:\Sites\FTP_Practica05"
 
@@ -68,9 +78,12 @@ Function Setup-FTPSite {
     
     # Abrir Firewall de Windows
     Write-Host "[*] Abriendo Firewall de Windows para FTP..." -ForegroundColor Cyan
-    New-NetFirewallRule -DisplayName "FTP Servidor" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 21, 1024-65535 -ErrorAction SilentlyContinue
+    if (!(Get-NetFirewallRule -DisplayName "FTP Servidor" -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -DisplayName "FTP Servidor" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 21, 1024-65535
+    }
 
     Restart-WebItem "IIS:\Sites\FTP_Practica05"
+    Write-Host "[+] Sitio FTP configurado exitosamente." -ForegroundColor Green
 }
 
 # 4. Gestion Masiva de Usuarios
@@ -94,7 +107,9 @@ Function Add-FTPUsers {
 
         # Estructura de carpetas del usuario
         $userRoot = "C:\ftp_root\LocalUser\$user"
-        New-Item -ItemType Directory -Path $userRoot -Force | Out-Null
+        if (!(Test-Path $userRoot)) {
+            New-Item -ItemType Directory -Path $userRoot -Force | Out-Null
+        }
         
         $juncGeneral = Join-Path $userRoot "general"
         $juncGroup = Join-Path $userRoot $targetGroup
@@ -147,7 +162,6 @@ Function Remove-FTPUser {
     } else {
         Write-Host "[-] Usuario no encontrado." -ForegroundColor Red
     }
-    Read-Host "Presione Enter para continuar..."
 }
 
 # 7. Listar Usuarios
@@ -166,7 +180,6 @@ Function Get-RegisteredFTPUsers {
         }
     }
     Write-Host "------------------------------------------"
-    Read-Host "Presione Enter para continuar..."
 }
 
 # 8. Login Simulado
@@ -192,7 +205,6 @@ Function Test-UserLogin {
     } else {
         Write-Host "[-] Usuario no encontrado." -ForegroundColor Red
     }
-    Read-Host "Presione Enter para continuar..."
 }
 
 # MENU PRINCIPAL
@@ -211,9 +223,14 @@ while ($true) {
     Write-Host "====================================================" -ForegroundColor Cyan
 
     $choice = Read-Host "Seleccione una opcion"
+    $showPause = $true
 
     switch ($choice) {
-        "1" { Install-FTPServer; Initialize-Environment; Setup-FTPSite }
+        "1" { 
+            Install-FTPServer
+            Initialize-Environment
+            Setup-FTPSite
+        }
         "2" { 
             $countSelect = Read-Host "Cuantos usuarios desea crear?"
             if ($countSelect -as [int]) { Add-FTPUsers -n ([int]$countSelect) }
@@ -223,9 +240,15 @@ while ($true) {
         "5" { Remove-FTPUser }
         "6" { Test-UserLogin }
         "7" { Write-Host "Saliendo..."; exit }
-        Default { Write-Host "Opcion no valida."; Start-Sleep -Seconds 1; continue }
+        Default { 
+            Write-Host "Opcion no valida." -ForegroundColor Red
+            $showPause = $false
+            Start-Sleep -Seconds 1
+        }
     }
     
-    Write-Host ""
-    Read-Host "Presione Enter para volver al menu..."
+    if ($showPause) {
+        Write-Host ""
+        Read-Host "Presione Enter para volver al menu..."
+    }
 }
