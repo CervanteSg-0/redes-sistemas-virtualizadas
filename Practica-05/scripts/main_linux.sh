@@ -66,13 +66,14 @@ setup_base_env() {
 # 3. Configurar vsftpd.conf
 config_vsftpd() {
     echo "[*] Configurando vsftpd.conf..."
+    # Asegurarse de que el directorio del chroot seguro exista
+    mkdir -p /var/run/vsftpd/empty
+
     cat <<EOF > /etc/vsftpd.conf
 # Configuracion Practica 05
-listen=NO
-listen_ipv6=YES
+listen=YES
+listen_ipv6=NO
 anonymous_enable=YES
-no_anon_password=YES
-anon_root=/srv/ftp/general
 local_enable=YES
 write_enable=YES
 local_umask=022
@@ -84,17 +85,22 @@ chroot_local_user=YES
 allow_writeable_chroot=YES
 secure_chroot_dir=/var/run/vsftpd/empty
 pam_service_name=vsftpd
-rsa_cert_file=/etc/pki/tls/certs/vsftpd.pem
-rsa_private_key_file=/etc/pki/tls/private/vsftpd.pem
-ssl_enable=NO
 
+# Personalización Raíz
+no_anon_password=YES
+anon_root=/srv/ftp/general
 
+# Modo Pasivo (Para Filezilla)
 pasv_enable=YES
 pasv_min_port=40000
 pasv_max_port=40100
+
+# SSL Desactivado
+ssl_enable=NO
 EOF
     systemctl restart vsftpd
     systemctl enable vsftpd
+    echo "[+] Configuración aplicada. Reinicie su cliente de FileZilla e intente de nuevo."
 }
 
 # 4. Gestión de Usuarios y Bind Mounts
