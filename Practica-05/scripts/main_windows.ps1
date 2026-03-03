@@ -21,15 +21,21 @@ Function Install-FTPServer {
 Function Initialize-Environment {
     Write-Host "[*] Inicializando Grupos y Directorios..." -ForegroundColor Cyan
     
-    # RELAJAR POLITICAS DE CONTRASEÑA (Para permitir contraseñas simples como 1234)
-    Write-Host "[*] Relajando politicas de seguridad de contraseñas..." -ForegroundColor Yellow
+    # DESACTIVAR REGLAS DE SEGURIDAD (Para permitir contrasenas simples como 1234)
+    Write-Host "[*] Aplicando politicas de contrasenas debiles para la practica..." -ForegroundColor Yellow
     $cfgFile = "$env:TEMP\pwd_policy.inf"
     secedit /export /cfg $cfgFile /quiet
-    (Get-Content $cfgFile) | ForEach-Object {
-        $_ -replace "PasswordComplexity = 1", "PasswordComplexity = 0" `
-           -replace "MinimumPasswordLength = .*", "MinimumPasswordLength = 0"
-    } | Set-Content $cfgFile
+    $content = Get-Content $cfgFile
+    $content = $content -replace "PasswordComplexity = 1", "PasswordComplexity = 0"
+    $content = $content -replace "MinimumPasswordLength = .*", "MinimumPasswordLength = 0"
+    $content = $content -replace "PasswordHistorySize = .*", "PasswordHistorySize = 0"
+    $content = $content -replace "MaximumPasswordAge = .*", "MaximumPasswordAge = -1"
+    $content | Set-Content $cfgFile
     secedit /configure /db "$env:TEMP\pwd.sdb" /cfg $cfgFile /areas SECURITYPOLICY /quiet
+    
+    # Tambien usamos net accounts para asegurar la longitud minima
+    net accounts /minpwlen:0 /maxpwage:unlimited /minpwage:0 /unique:0
+    
     Remove-Item $cfgFile -ErrorAction SilentlyContinue
 
     # Crear Grupos
