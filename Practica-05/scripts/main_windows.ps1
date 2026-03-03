@@ -50,34 +50,29 @@ Function Initialize-Environment {
 # 3. Configuracion del Sitio FTP en IIS
 Function Setup-FTPSite {
     Write-Host "[*] Desbloqueando secciones de configuracion IIS..." -ForegroundColor Cyan
-    # Estos comandos corrigen el error de "seccion bloqueada" (locked section)
-    # Permiten configurar autenticacion y autorizacion a nivel de sitio
     $appcmd = "$env:windir\system32\inetsrv\appcmd.exe"
     & $appcmd unlock config /section:system.ftpServer/security/authentication
     & $appcmd unlock config /section:system.ftpServer/security/authorization
 
     Write-Host "[*] Configurando Sitio FTP en IIS..." -ForegroundColor Cyan
     
-    # Eliminar sitio si existe de forma segura
     if (Get-Website -Name "FTP_Practica05" -ErrorAction SilentlyContinue) {
         Remove-Website -Name "FTP_Practica05"
     }
     
-    # Usar New-WebFtpSite (requiere WebAdministration e IIS activo)
     New-WebFtpSite -Name "FTP_Practica05" -Port 21 -PhysicalPath "C:\ftp_root" -Force
     
-    # Habilitar Aislamiento de Usuarios
     Set-ItemProperty "IIS:\Sites\FTP_Practica05" -Name ftpServer.userIsolation.mode -Value "IsolateUsers"
     
-    # Configurar Autenticacion (Basica y Anonima)
-    Set-WebConfigurationProperty -Filter "/system.ftpServer/security/authentication/basicAuthentication" -Name "enabled" -Value $true -PSPath "IIS:\Sites\FTP_Practica05"
-    Set-WebConfigurationProperty -Filter "/system.ftpServer/security/authentication/anonymousAuthentication" -Name "enabled" -Value $true -PSPath "IIS:\Sites\FTP_Practica05"
+    # Limpiar y establecer autenticacion
+    Set-WebConfigurationProperty -Filter "/system.ftpServer/security/authentication/basicAuthentication" -Name "enabled" -Value $true -PSPath "IIS:\Sites\FTP_Practica05" -ErrorAction SilentlyContinue
+    Set-WebConfigurationProperty -Filter "/system.ftpServer/security/authentication/anonymousAuthentication" -Name "enabled" -Value $true -PSPath "IIS:\Sites\FTP_Practica05" -ErrorAction SilentlyContinue
 
-    # Reglas de Autorizacion Globales
+    # Limpiar reglas de autorizacion previas para evitar error de duplicado
+    Clear-WebConfiguration -Filter "/system.ftpServer/security/authorization" -PSPath "IIS:\Sites\FTP_Practica05" -ErrorAction SilentlyContinue
     Add-WebConfigurationProperty -Filter "/system.ftpServer/security/authorization" -Name "." -Value @{accessType="Allow"; users="*"; permissions="Read, Write"} -PSPath "IIS:\Sites\FTP_Practica05"
     
-    # Abrir Firewall de Windows
-    Write-Host "[*] Abriendo Firewall de Windows para FTP..." -ForegroundColor Cyan
+    Write-Host "[*] Abriendo Firewall de Windows..." -ForegroundColor Cyan
     if (!(Get-NetFirewallRule -DisplayName "FTP Servidor" -ErrorAction SilentlyContinue)) {
         New-NetFirewallRule -DisplayName "FTP Servidor" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 21, 1024-65535
     }
