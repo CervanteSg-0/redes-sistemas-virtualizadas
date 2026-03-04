@@ -226,19 +226,20 @@ Function Test-UserLogin {
     
     $localUser = Get-LocalUser -Name $userLogin -ErrorAction SilentlyContinue
     if ($localUser) {
-        # Verificar grupos uno por uno para mayor precision
+        # Verificar grupos de forma robusta
         $inGroup = $false
         $ftpGroups = @("reprobados", "recursadores")
         foreach ($grpName in $ftpGroups) {
-            if (Get-LocalGroupMember -Group $grpName -Member $userLogin -ErrorAction SilentlyContinue) {
+            $members = Get-LocalGroupMember -Group $grpName -ErrorAction SilentlyContinue
+            # Buscamos el nombre del usuario al final de la cadena (por si tiene SERVER\ delante)
+            if ($members | Where-Object { $_.Name -split '\\' | Select-Object -Last 1 -eq $userLogin }) {
                 $inGroup = $true
                 break
             }
         }
 
         if (!$inGroup) {
-            Write-Host "[-] El usuario existe en Windows pero no pertenece a los grupos FTP (reprobados/recursadores)." -ForegroundColor Red
-            Write-Host "[!] Consejo: Borre el usuario (opcion 5) y creelo de nuevo (opcion 2) con una contraseña fuerte." -ForegroundColor Yellow
+            Write-Host "[-] El usuario '$userLogin' existe pero no esta asignado a 'reprobados' o 'recursadores'." -ForegroundColor Red
             return
         }
 
@@ -248,9 +249,11 @@ Function Test-UserLogin {
         $loginRoot = "C:\ftp_root\LocalUser\$userLogin"
         if (Test-Path $loginRoot) {
             Get-ChildItem -Path $loginRoot | Select-Object Name
+        } else {
+            Write-Host "[!] Advertencia: La carpeta fisica no fue encontrada en $loginRoot" -ForegroundColor Yellow
         }
     } else {
-        Write-Host "[-] El usuario '$userLogin' no existe en el sistema." -ForegroundColor Red
+        Write-Host "[-] El usuario '$userLogin' no existe en este servidor." -ForegroundColor Red
     }
 }
 
