@@ -55,13 +55,21 @@ Function Initialize-Environment {
         }
     }
 
+    # Permisos NTFS amplios para que IIS/FTP pueda acceder
+    $acl = Get-Acl "C:\ftp_root"
+    $usersRule = New-Object System.Security.AccessControl.FileSystemAccessRule("Users","FullControl","ContainerInherit,ObjectInherit","None","Allow")
+    $everyoneRule = New-Object System.Security.AccessControl.FileSystemAccessRule("Everyone","Read","ContainerInherit,ObjectInherit","None","Allow")
+    $acl.SetAccessRule($usersRule)
+    $acl.SetAccessRule($everyoneRule)
+    Set-Acl "C:\ftp_root" $acl
+
     # Permisos para carpeta General
-    $acl = Get-Acl "C:\ftp_root\general"
+    $acl2 = Get-Acl "C:\ftp_root\general"
     $anonRule = New-Object System.Security.AccessControl.FileSystemAccessRule("Everyone","Read","ContainerInherit,ObjectInherit","None","Allow")
     $authRule = New-Object System.Security.AccessControl.FileSystemAccessRule("Users","Modify","ContainerInherit,ObjectInherit","None","Allow")
-    $acl.SetAccessRule($anonRule)
-    $acl.SetAccessRule($authRule)
-    Set-Acl "C:\ftp_root\general" $acl
+    $acl2.SetAccessRule($anonRule)
+    $acl2.SetAccessRule($authRule)
+    Set-Acl "C:\ftp_root\general" $acl2
 }
 
 # 3. Configuracion del Sitio FTP en IIS
@@ -139,6 +147,12 @@ Function Add-FTPUsers {
         if (!(Test-Path $userRoot)) {
             New-Item -ItemType Directory -Path $userRoot -Force | Out-Null
         }
+        
+        # Dar permisos NTFS al usuario sobre su carpeta
+        $userAcl = Get-Acl $userRoot
+        $userPermission = New-Object System.Security.AccessControl.FileSystemAccessRule($user,"FullControl","ContainerInherit,ObjectInherit","None","Allow")
+        $userAcl.SetAccessRule($userPermission)
+        Set-Acl $userRoot $userAcl
         
         $juncGeneral = Join-Path $userRoot "general"
         $juncGroup = Join-Path $userRoot $targetGroup
