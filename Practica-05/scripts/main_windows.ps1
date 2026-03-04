@@ -72,31 +72,39 @@ Function Initialize-Environment {
     }
 
     # --- Permisos NTFS ---
-    # Raiz: Everyone=Read, Users=FullControl
-    $acl = Get-Acl "C:\ftp_root"
-    $acl.SetAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("Everyone","Read","ContainerInherit,ObjectInherit","None","Allow")))
-    $acl.SetAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("Users","FullControl","ContainerInherit,ObjectInherit","None","Allow")))
-    Set-Acl "C:\ftp_root" $acl
+    # Raiz: Everyone y Users necesitan acceso para que IIS funcione
+    foreach ($path in @("C:\ftp_root", "C:\ftp_root\LocalUser")) {
+        $acl = Get-Acl $path
+        $acl.SetAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("Everyone","ReadAndExecute","ContainerInherit,ObjectInherit","None","Allow")))
+        $acl.SetAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("Users","FullControl","ContainerInherit,ObjectInherit","None","Allow")))
+        Set-Acl $path $acl
+    }
 
     # Publica: Everyone=Modify (leer y escribir para todos)
     $acl2 = Get-Acl "C:\ftp_root\publica"
     $acl2.SetAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("Everyone","Modify","ContainerInherit,ObjectInherit","None","Allow")))
     Set-Acl "C:\ftp_root\publica" $acl2
 
-    # Grupos: Solo miembros del grupo pueden leer/escribir
+    # Grupos: miembros del grupo + Everyone=Read
     foreach ($g in $groups) {
         $gAcl = Get-Acl "C:\ftp_root\grupos\$g"
         $gAcl.SetAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($g,"Modify","ContainerInherit,ObjectInherit","None","Allow")))
+        $gAcl.SetAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("Everyone","ReadAndExecute","ContainerInherit,ObjectInherit","None","Allow")))
         Set-Acl "C:\ftp_root\grupos\$g" $gAcl
     }
 
-    # Carpeta anonima: junctions a todas las carpetas (solo lectura)
+    # Carpeta anonima (Public): junctions a todas las carpetas
     $anonPub = "C:\ftp_root\LocalUser\Public\publica"
     if (!(Test-Path $anonPub)) { cmd /c mklink /j "$anonPub" "C:\ftp_root\publica" }
     $anonRep = "C:\ftp_root\LocalUser\Public\reprobados"
     if (!(Test-Path $anonRep)) { cmd /c mklink /j "$anonRep" "C:\ftp_root\grupos\reprobados" }
     $anonRec = "C:\ftp_root\LocalUser\Public\recursadores"
     if (!(Test-Path $anonRec)) { cmd /c mklink /j "$anonRec" "C:\ftp_root\grupos\recursadores" }
+
+    # Permisos para carpeta Public (anonimo)
+    $pubAcl = Get-Acl "C:\ftp_root\LocalUser\Public"
+    $pubAcl.SetAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("Everyone","ReadAndExecute","ContainerInherit,ObjectInherit","None","Allow")))
+    Set-Acl "C:\ftp_root\LocalUser\Public" $pubAcl
 
     Write-Host "[+] Entorno base configurado." -ForegroundColor Green
 }
@@ -123,13 +131,13 @@ Function Setup-FTPSite {
     }
 
     # Crear nuevo sitio FTP
+    # Raiz fisica = C:\ftp_root (IIS busca LocalUser\<usuario> dentro de aqui)
     New-WebFtpSite -Name "FTP_Practica05" -Port 21 -PhysicalPath "C:\ftp_root" -Force
 
-    # Aislamiento de Usuarios
-    # Modo 0 = Sin aislamiento (todos ven C:\ftp_root)
-    # Modo 2 = IsolateUsers (cada usuario ve C:\ftp_root\LocalUser\<usuario>)
-    # Usamos modo 0 para compatibilidad, las carpetas se organizan con junctions
-    Set-ItemProperty "IIS:\Sites\FTP_Practica05" -Name ftpServer.userIsolation.mode -Value 0
+    # Aislamiento: Modo 2 = cada usuario ve SOLO su carpeta
+    # IIS busca: C:\ftp_root\LocalUser\<nombre_usuario>
+    # Anonimo: C:\ftp_root\LocalUser\Public
+    Set-ItemProperty "IIS:\Sites\FTP_Practica05" -Name ftpServer.userIsolation.mode -Value 2
 
     # Desactivar SSL (Permitir texto plano)
     Set-ItemProperty "IIS:\Sites\FTP_Practica05" -Name ftpServer.security.ssl.controlChannelPolicy -Value 0
