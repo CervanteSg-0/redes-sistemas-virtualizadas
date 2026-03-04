@@ -102,13 +102,16 @@ Function Setup-FTPSite {
     Set-ItemProperty "IIS:\Sites\FTP_Practica05" -Name ftpServer.security.ssl.controlChannelPolicy -Value 0
     Set-ItemProperty "IIS:\Sites\FTP_Practica05" -Name ftpServer.security.ssl.dataChannelPolicy -Value 0
     
-    # Configurar Autenticacion via appcmd (mas confiable)
-    & $appcmd set config "FTP_Practica05" /section:system.ftpServer/security/authentication/basicAuthentication /enabled:true /commit:apphost
-    & $appcmd set config "FTP_Practica05" /section:system.ftpServer/security/authentication/anonymousAuthentication /enabled:true /commit:apphost
+    # Configurar Autenticacion (Basica y Anonima)
+    Set-ItemProperty "IIS:\Sites\FTP_Practica05" -Name ftpServer.security.authentication.basicAuthentication.enabled -Value $true
+    Set-ItemProperty "IIS:\Sites\FTP_Practica05" -Name ftpServer.security.authentication.anonymousAuthentication.enabled -Value $true
     
-    # Limpiar y aplicar reglas de autorizacion via appcmd
-    & $appcmd set config "FTP_Practica05" /section:system.ftpServer/security/authorization /-"[users='*']" /commit:apphost 2>$null
-    & $appcmd set config "FTP_Practica05" /section:system.ftpServer/security/authorization /+"[accessType='Allow',users='*',permissions='Read,Write']" /commit:apphost
+    # Limpiar y aplicar reglas de autorizacion
+    Clear-WebConfiguration -Filter "/system.ftpServer/security/authorization" -PSPath "IIS:\Sites\FTP_Practica05" -ErrorAction SilentlyContinue
+    Add-WebConfigurationProperty -Filter "/system.ftpServer/security/authorization" -Name "." -Value @{accessType="Allow"; users="*"; permissions="Read, Write"} -PSPath "IIS:\Sites\FTP_Practica05" -ErrorAction SilentlyContinue
+    
+    # Si falla a nivel de sitio, aplicar a nivel de servidor
+    & $appcmd set config /section:system.ftpServer/security/authorization /+"[accessType='Allow',users='*',permissions='Read,Write']" /commit:apphost 2>$null
     
     # Abrir Firewall
     Write-Host "[*] Abriendo Firewall de Windows..." -ForegroundColor Cyan
@@ -116,10 +119,6 @@ Function Setup-FTPSite {
         New-NetFirewallRule -DisplayName "FTP Servidor" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 21, 1024-65535
     }
 
-    # Reiniciar el sitio
-    Stop-Website -Name "FTP_Practica05" -ErrorAction SilentlyContinue
-    Start-Website -Name "FTP_Practica05"
-    
     # Reiniciar servicio FTP completo
     Restart-Service ftpsvc -ErrorAction SilentlyContinue
     
