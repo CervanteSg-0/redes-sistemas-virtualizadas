@@ -232,7 +232,7 @@ Function Test-UserLogin {
         foreach ($grpName in $ftpGroups) {
             $members = Get-LocalGroupMember -Group $grpName -ErrorAction SilentlyContinue
             # Buscamos el nombre del usuario al final de la cadena (por si tiene SERVER\ delante)
-            if ($members | Where-Object { $_.Name -split '\\' | Select-Object -Last 1 -eq $userLogin }) {
+            if ($members | Where-Object { ($_.Name -split '\\' | Select-Object -Last 1) -eq $userLogin }) {
                 $inGroup = $true
                 break
             }
