@@ -81,6 +81,10 @@ Function Setup-FTPSite {
     
     Set-ItemProperty "IIS:\Sites\FTP_Practica05" -Name ftpServer.userIsolation.mode -Value "IsolateUsers"
     
+    # Desactivar requerimiento de SSL (Permitir texto plano)
+    Set-ItemProperty "IIS:\Sites\FTP_Practica05" -Name ftpServer.security.ssl.controlChannelPolicy -Value 0
+    Set-ItemProperty "IIS:\Sites\FTP_Practica05" -Name ftpServer.security.ssl.dataChannelPolicy -Value 0
+
     # Limpiar y establecer autenticacion
     Set-WebConfigurationProperty -Filter "/system.ftpServer/security/authentication/basicAuthentication" -Name "enabled" -Value $true -PSPath "IIS:\Sites\FTP_Practica05" -ErrorAction SilentlyContinue
     Set-WebConfigurationProperty -Filter "/system.ftpServer/security/authentication/anonymousAuthentication" -Name "enabled" -Value $true -PSPath "IIS:\Sites\FTP_Practica05" -ErrorAction SilentlyContinue
