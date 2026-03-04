@@ -131,13 +131,11 @@ Function Setup-FTPSite {
     }
 
     # Crear nuevo sitio FTP
-    # Raiz fisica = C:\ftp_root (IIS busca LocalUser\<usuario> dentro de aqui)
-    New-WebFtpSite -Name "FTP_Practica05" -Port 21 -PhysicalPath "C:\ftp_root" -Force
+    # La raiz apunta a LocalUser para que los usuarios accedan a sus carpetas
+    New-WebFtpSite -Name "FTP_Practica05" -Port 21 -PhysicalPath "C:\ftp_root\LocalUser" -Force
 
-    # Aislamiento: Modo 2 = cada usuario ve SOLO su carpeta
-    # IIS busca: C:\ftp_root\LocalUser\<nombre_usuario>
-    # Anonimo: C:\ftp_root\LocalUser\Public
-    Set-ItemProperty "IIS:\Sites\FTP_Practica05" -Name ftpServer.userIsolation.mode -Value 2
+    # Modo 0 = sin aislamiento estricto (compatible con este servidor)
+    Set-ItemProperty "IIS:\Sites\FTP_Practica05" -Name ftpServer.userIsolation.mode -Value 0
 
     # Desactivar SSL (Permitir texto plano)
     Set-ItemProperty "IIS:\Sites\FTP_Practica05" -Name ftpServer.security.ssl.controlChannelPolicy -Value 0
