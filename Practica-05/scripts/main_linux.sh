@@ -114,7 +114,8 @@ config_vsftpd() {
     # Detectar la IP de la LAN para el modo pasivo
     LAN_IP=$(hostname -I | awk '{print $1}')
     echo "[*] Configurando vsftpd.conf (IP PASV: $LAN_IP)..."
-    mkdir -p /var/run/vsftpd/empty
+    mkdir -p /usr/share/empty
+    chmod 555 /usr/share/empty
 
     # Crear el contenido base
     cat <<'VSFTPD_EOF' > /etc/vsftpd.conf
@@ -160,7 +161,7 @@ use_localtime=YES
 connect_from_port_20=YES
 
 # --- Seguridad ---
-secure_chroot_dir=/var/run/vsftpd/empty
+secure_chroot_dir=/usr/share/empty
 ssl_enable=NO
 VSFTPD_EOF
 
