@@ -3,13 +3,24 @@
 # Script principal para el aprovisionamiento web en Windows
 # ==============================================================================
 
-# Cargar funciones
-. (Join-Path $PSScriptRoot "http_functions.ps1")
+# Forzar codificacion UTF8 para evitar caracteres extranjeros en la terminal
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
+# Cargar funciones (Dot-Sourcing)
+$functionsPath = Join-Path $PSScriptRoot "http_functions.ps1"
+if (Test-Path $functionsPath) {
+    . $functionsPath
+} else {
+    Write-Host "[ERROR] No se encontro el archivo http_functions.ps1 en $functionsPath" -ForegroundColor Red
+    Read-Host "Presione Enter para salir"
+    exit 1
+}
 
 # Verificar permisos de Administrador
 $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host "Este script debe ejecutarse como Administrador." -ForegroundColor Red
+    Read-Host "Presione Enter para salir"
     exit 1
 }
 
@@ -26,7 +37,7 @@ function Show-Menu {
     Write-Host "6. Eliminar por completo un servicio (Purge)"
     Write-Host "7. Salir"
     Write-Host "==========================================" -ForegroundColor Green
-    $choice = Read-Host "Seleccione una opción"
+    $choice = Read-Host "Seleccione una opcion"
     return $choice
 }
 
@@ -44,14 +55,14 @@ while ($true) {
             $versions = Get-ServiceVersions -PackageName $service
             Write-Host "Versiones disponibles:"
             $versions
-            $version = Read-Host "Ingrese la versión exacta"
+            $version = Read-Host "Ingrese la version exacta"
         }
         "3" {
             $service = "nginx"
             $versions = Get-ServiceVersions -PackageName $service
             Write-Host "Versiones disponibles:"
             $versions
-            $version = Read-Host "Ingrese la versión exacta"
+            $version = Read-Host "Ingrese la version exacta"
         }
         "4" {
             Get-ServicesStatus
@@ -63,12 +74,12 @@ while ($true) {
             Write-Host "1. IIS"
             Write-Host "2. Apache"
             Write-Host "3. Nginx"
-            $stopOpt = Read-Host "Opción"
+            $stopOpt = Read-Host "Opcion"
             switch ($stopOpt) {
                 "1" { Stop-WindowsService -ServiceName "IIS" }
                 "2" { Stop-WindowsService -ServiceName "Apache" }
                 "3" { Stop-WindowsService -ServiceName "Nginx" }
-                Default { Write-Host "Opción inválida" }
+                Default { Write-Host "Opcion invalida" }
             }
             Read-Host "Presione Enter para continuar..."
             continue
@@ -78,12 +89,12 @@ while ($true) {
             Write-Host "1. IIS"
             Write-Host "2. Apache"
             Write-Host "3. Nginx"
-            $purgeOpt = Read-Host "Opción"
+            $purgeOpt = Read-Host "Opcion"
             switch ($purgeOpt) {
                 "1" { Clear-WindowsService -ServiceName "IIS" }
                 "2" { Clear-WindowsService -ServiceName "Apache" }
                 "3" { Clear-WindowsService -ServiceName "Nginx" }
-                Default { Write-Host "Opción inválida" }
+                Default { Write-Host "Opcion invalida" }
             }
             Read-Host "Presione Enter para continuar..."
             continue
@@ -93,32 +104,32 @@ while ($true) {
             exit
         }
         Default {
-            Write-Host "Opción inválida" -ForegroundColor Red
+            Write-Host "Opcion invalida" -ForegroundColor Red
             Start-Sleep -Seconds 2
             continue
         }
     }
 
-    # Solicitar puerto con validación y confirmación de salida
+    # Solicitar puerto con validacion y confirmacion de salida
     $portInputDone = $false
     while (-not $portInputDone) {
         $portStr = Read-Host "Ingrese el puerto de escucha"
         
-        # Validar numérico
+        # Validar numerico
         if ($portStr -match '^\d+$') {
             $port = [int]$portStr
             
             $reason = ""
             if (Test-IsReservedPort -Port $port) {
-                $reason = "está FUERA DE RANGO (1-65535)"
+                $reason = "esta FUERA DE RANGO (1-65535)"
             }
             elseif (-not (Test-PortAvailability -Port $port)) {
-                $reason = "ya está siendo OCUPADO"
+                $reason = "ya esta siendo OCUPADO"
             }
 
             if ($reason -ne "") {
                 Write-Host "[ALERTA] El puerto $port $reason." -ForegroundColor Red
-                $retry = Read-Host "¿Deseas intentar con otro puerto? (s/n)"
+                $retry = Read-Host "Deseas intentar con otro puerto? (s/n)"
                 if ($retry -match '^[nN]$') {
                     $gotoMenu = $true
                     break 
@@ -128,8 +139,8 @@ while ($true) {
 
             $portInputDone = $true
         } else {
-            Write-Host "[ERROR] El puerto debe ser numérico." -ForegroundColor Red
-            $retry = Read-Host "¿Deseas intentar con otro puerto? (s/n)"
+            Write-Host "[ERROR] El puerto debe ser numerico." -ForegroundColor Red
+            $retry = Read-Host "Deseas intentar con otro puerto? (s/n)"
             if ($retry -match '^[nN]$') {
                 $gotoMenu = $true
                 break 
@@ -139,7 +150,7 @@ while ($true) {
 
     if ($gotoMenu) { $gotoMenu = $false; continue }
 
-    # Ejecución
+    # Ejecucion
     switch ($service) {
         "IIS" { Install-IIS -Port $port }
         "apache-httpd" { Install-ApacheWindows -Version $version -Port $port }

@@ -1,6 +1,6 @@
 # ==============================================================================
 # Practica-06: http_functions.ps1
-# Librería de funciones para aprovisionamiento web automatizado en Windows
+# Libreria de funciones para aprovisionamiento web automatizado en Windows
 # ==============================================================================
 
 # Validar entrada
@@ -22,16 +22,16 @@ function Test-PortAvailability {
     return $true # Libre
 }
 
-# Validar que el puerto esté en el rango válido
+# Validar que el puerto este en el rango valido
 function Test-IsReservedPort {
     param([int]$Port)
     if ($Port -lt 1 -or $Port -gt 65535) {
-        return $true # Inválido
+        return $true # Invalido
     }
-    return $false # Válido
+    return $false # Valido
 }
 
-# Obtener versiones dinámicamente usando Chocolatey
+# Obtener versiones dinamicamente usando Chocolatey
 function Get-ServiceVersions {
     param([string]$PackageName)
     Write-Host "Consultando versiones para $PackageName en Chocolatey..." -ForegroundColor Blue
@@ -39,7 +39,7 @@ function Get-ServiceVersions {
     return $versions
 }
 
-# Crear página index.html simple
+# Crear pagina index.html simple
 function New-IndexPage {
     param(
         [string]$Service,
@@ -49,19 +49,26 @@ function New-IndexPage {
     )
     
     $html = @"
-Servidor: `$Service
-Versión: `$Version
-Puerto: `$Port
+Servidor: $Service
+Version: $Version
+Puerto: $Port
 "@
+    # Asegurar que el directorio existe
+    if (-not (Test-Path $Path)) { New-Item -Path $Path -ItemType Directory -Force }
+    
     New-Item -Path $Path -Name "index.html" -Value $html -ItemType File -Force
     # Permisos limitados (Solo lectura para el servicio)
-    $acl = Get-Acl $Path
-    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule("IIS_IUSRS", "ReadAndExecute", "Allow")
-    $acl.SetAccessRule($rule)
-    Set-Acl $Path $acl
+    try {
+        $acl = Get-Acl $Path
+        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule("IIS_IUSRS", "ReadAndExecute", "Allow")
+        $acl.SetAccessRule($rule)
+        Set-Acl $Path $acl
+    } catch {
+        Write-Host "Aviso: No se pudieron ajustar permisos de ACL (Ignorado fuera de dominio/entorno especifico)" -ForegroundColor Yellow
+    }
 }
 
-# Configuración de Seguridad IIS
+# Configuracion de Seguridad IIS
 function Set-IISSecurity {
     param([int]$Port)
     Write-Host "Configurando seguridad de IIS..." -ForegroundColor Cyan
@@ -78,7 +85,7 @@ function Set-IISSecurity {
     New-NetFirewallRule -DisplayName "HTTP-Practice-$Port" -LocalPort $Port -Protocol TCP -Action Allow -Force
 }
 
-# Instalación de IIS
+# Instalacion de IIS
 function Install-IIS {
     param([int]$Port)
     Write-Host "Habilitando IIS (Internet Information Services)..." -ForegroundColor Blue
@@ -92,10 +99,10 @@ function Install-IIS {
     Set-IISSecurity -Port $Port
 }
 
-# Instalación de Apache Win64
+# Instalacion de Apache Win64
 function Install-ApacheWindows {
     param([string]$Version, [int]$Port)
-    Write-Host "Instalando Apache Win64 versión $Version..." -ForegroundColor Blue
+    Write-Host "Instalando Apache Win64 version $Version..." -ForegroundColor Blue
     choco install apache-httpd --version $Version -y
     
     $confPath = "C:\tools\apache24\conf\httpd.conf"
@@ -106,28 +113,37 @@ function Install-ApacheWindows {
         Add-Content $confPath "`nServerTokens Prod`nServerSignature Off"
     }
     
+    # Crear index especifico
+    New-IndexPage -Service "Apache" -Version $Version -Port $Port -Path "C:\tools\apache24\htdocs"
+    
     # Firewall
     New-NetFirewallRule -DisplayName "Apache-Practice-$Port" -LocalPort $Port -Protocol TCP -Action Allow -Force
     Start-Service -Name "Apache2.4" -ErrorAction SilentlyContinue
 }
 
-# Instalación de Nginx Windows
+# Instalacion de Nginx Windows
 function Install-NginxWindows {
     param([string]$Version, [int]$Port)
-    Write-Host "Instalando Nginx para Windows versión $Version..." -ForegroundColor Blue
+    Write-Host "Instalando Nginx para Windows version $Version..." -ForegroundColor Blue
     choco install nginx --version $Version -y
     
     $confPath = "C:\tools\nginx\conf\nginx.conf"
     if (Test-Path $confPath) {
         (Get-Content $confPath) -replace "listen\s+\d+;", "listen $Port;" | Set-Content $confPath
         (Get-Content $confPath) -replace "listen\s+\[::\]:\d+;", "listen [::]:$Port;" | Set-Content $confPath
-        # Ocultar versión
+        # Ocultar version
         (Get-Content $confPath) -replace "#server_tokens off;", "server_tokens off;" | Set-Content $confPath
+        
+        # Cambiar root para evitar conflictos (opcional pero recomendado)
+        $nginxHtm = "C:\tools\nginx\html"
+        (Get-Content $confPath) -replace 'root\s+html;', "root $nginxHtm;" | Set-Content $confPath
     }
+    
+    # Crear index especifico
+    New-IndexPage -Service "Nginx" -Version $Version -Port $Port -Path "C:\tools\nginx\html"
     
     # Firewall
     New-NetFirewallRule -DisplayName "Nginx-Practice-$Port" -LocalPort $Port -Protocol TCP -Action Allow -Force
-    # Nginx en windows se suele correr como proceso o servicio nssm
 }
 
 # Bajar servicios en Windows
@@ -142,7 +158,7 @@ function Stop-WindowsService {
     Write-Host "Servicio $ServiceName detenido." -ForegroundColor Green
 }
 
-# Función para verificar estado y puertos de los servicios en Windows
+# Funcion para verificar estado y puertos de los servicios en Windows
 function Get-ServicesStatus {
     Write-Host "`n==========================================" -ForegroundColor Blue
     Write-Host "       ESTADO DE LOS SERVICIOS WEB        " -ForegroundColor Blue
@@ -162,7 +178,7 @@ function Get-ServicesStatus {
         $statusColor = "Red"
         $ports = "-"
 
-        # Verificar si el servicio o proceso está corriendo
+        # Verificar si el servicio o proceso esta corriendo
         $isRunning = $false
         if ($srv.SrvName -ne "") {
             $s = Get-Service -Name $srv.SrvName -ErrorAction SilentlyContinue
@@ -178,7 +194,7 @@ function Get-ServicesStatus {
             
             # Intentar obtener puertos
             if ($srv.Name -eq "IIS") {
-                # Para IIS usamos el módulo de WebAdministration que es más fiable
+                # Para IIS usamos el modulo de WebAdministration que es mas fiable
                 try {
                     Import-Module WebAdministration -ErrorAction SilentlyContinue
                     $bindings = Get-WebBinding -Protocol "http"
@@ -204,16 +220,16 @@ function Get-ServicesStatus {
     Write-Host "==========================================`n" -ForegroundColor Blue
 }
 
-# Función para eliminación total de servicios en Windows (Purge)
+# Funcion para eliminacion total de servicios en Windows (Purge)
 function Clear-WindowsService {
     param([string]$ServiceName)
     Write-Host "ELIMINANDO por completo $ServiceName (archivos y registros)..." -ForegroundColor Red
     
     switch ($ServiceName) {
         "IIS" {
-            # Deshabilitar característica de Windows
+            # Deshabilitar caracteristica de Windows
             Disable-WindowsOptionalFeature -Online -FeatureName "IIS-WebServerRole", "IIS-WebServer" -NoRestart
-            # Intentar borrar carpeta si está vacía o con el index generado
+            # Intentar borrar carpeta si esta vacia o con el index generado
             if (Test-Path "C:\inetpub\wwwroot\index.html") { Remove-Item "C:\inetpub\wwwroot\index.html" -Force }
         }
         "Apache" {
