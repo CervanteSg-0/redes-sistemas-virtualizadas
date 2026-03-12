@@ -174,18 +174,30 @@ install_tomcat() {
     local port=$1
     local version="9.0.86" # Versión manual estable
     
+    echo -e "${BLUE}Preparando entorno para Tomcat...${NC}"
+    
+    # 0. Instalar Java (Requisito indispensable)
+    if ! command -v java &>/dev/null; then
+        echo -e "${BLUE}Instalando Java (OpenJDK)...${NC}"
+        dnf install -y java-1.8.0-openjdk-devel 2>/dev/null || urpmi --auto java-1.8.0-openjdk-devel
+    fi
+    
+    # Detectar JAVA_HOME dinámicamente en Mageia
+    local java_path=$(readlink -f $(command -v java) | sed "s:/bin/java::")
+    echo -e "${BLUE}JAVA_HOME detectado en: $java_path${NC}"
+    
     echo -e "${BLUE}Instalando Tomcat $version manualmente (Binarios)...${NC}"
     
     # 1. Crear usuario dedicado
     if ! id "tomcat" &>/dev/null; then
-        useradd -m -U -d /opt/tomcat -s /bin/false tomcat
+        useradd -m -U -d /opt/tomcat -s /bin/false tomcat 2>/dev/null
     fi
     
     # 2. Descargar y extraer
     cd /tmp
-    wget -q https://archive.apache.org/dist/tomcat/tomcat-9/v$version/bin/apache-tomcat-$version.tar.gz
+    [ ! -f "apache-tomcat-$version.tar.gz" ] && wget -q https://archive.apache.org/dist/tomcat/tomcat-9/v$version/bin/apache-tomcat-$version.tar.gz
     mkdir -p /opt/tomcat
-    tar xzvf apache-tomcat-$version.tar.gz -C /opt/tomcat --strip-components=1
+    tar xzvf apache-tomcat-$version.tar.gz -C /opt/tomcat --strip-components=1 > /dev/null
     
     # 3. Permisos restringidos (Requerimiento de seguridad)
     chown -R tomcat:tomcat /opt/tomcat
@@ -197,7 +209,7 @@ install_tomcat() {
     # 5. Crear index personalizado
     create_custom_index "Tomcat" "$version" "$port" "/opt/tomcat/webapps/ROOT"
     
-    # 6. Crear servicio systemd para manejo de variables de entorno
+    # 6. Crear servicio systemd
     cat <<EOF > /etc/systemd/system/tomcat.service
 [Unit]
 Description=Apache Tomcat 9 Web Application Container
@@ -207,7 +219,7 @@ After=network.target
 Type=forking
 User=tomcat
 Group=tomcat
-Environment="JAVA_HOME=/usr/lib/jvm/default-java"
+Environment="JAVA_HOME=$java_path"
 Environment="CATALINA_PID=/opt/tomcat/temp/tomcat.pid"
 Environment="CATALINA_HOME=/opt/tomcat"
 ExecStart=/opt/tomcat/bin/startup.sh
@@ -218,10 +230,13 @@ WantedBy=multi-user.target
 EOF
 
     systemctl daemon-reload
-    systemctl enable tomcat
+    systemctl enable tomcat 2>/dev/null
     systemctl start tomcat
     
-    ufw allow "$port/tcp" &>/dev/null
+    # Firewall Mageia
+    firewall-cmd --permanent --add-port=$port/tcp 2>/dev/null
+    firewall-cmd --reload 2>/dev/null
+    
     echo -e "${GREEN}Tomcat configurado manualmente en el puerto $port.${NC}"
 }
 
