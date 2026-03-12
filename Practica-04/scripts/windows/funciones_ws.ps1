@@ -45,11 +45,31 @@ function Modulo-SSH {
         }
     } catch {
         Write-Host "Error al comprobar/instalar ssh: $($_.Exception.Message)"
+        Pausa-Tecla
+        return
     }
 
     Write-Host "[*] Configurando el servicio para inicio automatico..."
-    Set-Service -Name sshd -StartupType Automatic
-    Start-Service sshd -ErrorAction SilentlyContinue
+    # Esperar un momento a que el servicio se registre si se acaba de instalar
+    Start-Sleep -Seconds 2
+    
+    $sshd = Get-Service -Name sshd -ErrorAction SilentlyContinue
+    if ($sshd) {
+        Set-Service -Name sshd -StartupType Automatic
+        Start-Service sshd -ErrorAction SilentlyContinue
+    } else {
+        Write-Host "[!] El servicio 'sshd' no se encontro. Intentando instalar via DISM..." -ForegroundColor Yellow
+        dism /online /Enable-Feature /FeatureName:OpenSSH-Server-OC /All /NoRestart
+        Start-Sleep -Seconds 5
+        if (Get-Service -Name sshd -ErrorAction SilentlyContinue) {
+            Set-Service -Name sshd -StartupType Automatic
+            Start-Service sshd -ErrorAction SilentlyContinue
+        } else {
+            Write-Host "[!] Fallo critico: No se pudo instalar o encontrar el servicio SSH." -ForegroundColor Red
+            Pausa-Tecla
+            return
+        }
+    }
 
     Write-Host "[*] Verificando reglas del Firewall..."
     $fwRule = Get-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -ErrorAction SilentlyContinue
