@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# Practica-07: http_functions.sh
+# Practica-06: http_functions.sh
 # Librería de funciones para aprovisionamiento web automatizado en Linux
 # ==============================================================================
 
@@ -212,4 +212,32 @@ stop_linux_service() {
             ;;
     esac
     echo -e "${GREEN}Servicio $service detenido.${NC}"
+}
+
+# Función para verificar estado y puertos de los servicios
+check_services_status() {
+    echo -e "${BLUE}==========================================${NC}"
+    echo -e "${BLUE}       ESTADO DE LOS SERVICIOS WEB        ${NC}"
+    echo -e "${BLUE}==========================================${NC}"
+    printf "%-15s | %-12s | %-10s\n" "SERVICIO" "ESTADO" "PUERTO(S)"
+    echo "------------------------------------------"
+
+    # Lista de servicios a verificar
+    local services=("httpd" "nginx" "tomcat")
+    
+    for srv in "${services[@]}"; do
+        # Verificar estado
+        local status=$(systemctl is-active "$srv" 2>/dev/null)
+        if [[ "$status" == "active" ]]; then
+            status_text="${GREEN}Corriendo${NC}"
+            # Obtener puerto usando ss
+            local ports=$(ss -tulpn 2>/dev/null | grep "$srv" | awk '{print $5}' | cut -d':' -f2 | sort -u | tr '\n' ',' | sed 's/,$//')
+            [[ -z "$ports" ]] && ports="Desconocido"
+        else
+            status_text="${RED}Detenido${NC}"
+            ports="-"
+        fi
+        printf "%-15s | %-21s | %-10s\n" "$srv" "$status_text" "$ports"
+    done
+    echo -e "${BLUE}==========================================${NC}"
 }

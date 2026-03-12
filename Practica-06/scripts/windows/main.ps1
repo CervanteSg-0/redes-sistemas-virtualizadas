@@ -1,5 +1,5 @@
 # ==============================================================================
-# Practica-07: main.ps1
+# Practica-06: main.ps1
 # Script principal para el aprovisionamiento web en Windows
 # ==============================================================================
 
@@ -21,8 +21,9 @@ function Show-Menu {
     Write-Host "1. Instalar IIS (Obligatorio)"
     Write-Host "2. Instalar Apache Win64"
     Write-Host "3. Instalar Nginx"
-    Write-Host "4. Bajar un servicio"
-    Write-Host "5. Salir"
+    Write-Host "4. Mostrar estado de los servicios"
+    Write-Host "5. Bajar un servicio"
+    Write-Host "6. Salir"
     Write-Host "==========================================" -ForegroundColor Green
     $choice = Read-Host "Seleccione una opción"
     return $choice
@@ -52,6 +53,11 @@ while ($true) {
             $version = Read-Host "Ingrese la versión exacta"
         }
         "4" {
+            Get-ServicesStatus
+            Read-Host "Presione Enter para continuar..."
+            continue
+        }
+        "5" {
             Write-Host "Elija el servicio a bajar:"
             Write-Host "1. IIS"
             Write-Host "2. Apache"
@@ -66,7 +72,7 @@ while ($true) {
             Read-Host "Presione Enter para continuar..."
             continue
         }
-        "5" {
+        "6" {
             Write-Host "Saliendo..."
             exit
         }

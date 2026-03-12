@@ -1,5 +1,5 @@
 # ==============================================================================
-# Practica-07: http_functions.ps1
+# Practica-06: http_functions.ps1
 # Librería de funciones para aprovisionamiento web automatizado en Windows
 # ==============================================================================
 
@@ -139,4 +139,57 @@ function Stop-WindowsService {
         "Nginx" { Stop-Process -Name "nginx" -ErrorAction SilentlyContinue }
     }
     Write-Host "Servicio $ServiceName detenido." -ForegroundColor Green
+}
+
+# Función para verificar estado y puertos de los servicios en Windows
+function Get-ServicesStatus {
+    Write-Host "`n==========================================" -ForegroundColor Blue
+    Write-Host "       ESTADO DE LOS SERVICIOS WEB        " -ForegroundColor Blue
+    Write-Host "==========================================" -ForegroundColor Blue
+    Write-Host ("{0,-15} | {1,-12} | {2,-10}" -f "SERVICIO", "ESTADO", "PUERTO(S)")
+    Write-Host "------------------------------------------"
+
+    # Definir servicios y sus procesos/nombres de servicio
+    $services = @(
+        @{Name="IIS"; Binary="w3wp"; SrvName="W3SVC"},
+        @{Name="Apache"; Binary="httpd"; SrvName="Apache2.4"},
+        @{Name="Nginx"; Binary="nginx"; SrvName=""}
+    )
+
+    foreach ($srv in $services) {
+        $status = "Detenido"
+        $statusColor = "Red"
+        $ports = "-"
+
+        # Verificar si el servicio o proceso está corriendo
+        $isRunning = $false
+        if ($srv.SrvName -ne "") {
+            $s = Get-Service -Name $srv.SrvName -ErrorAction SilentlyContinue
+            if ($s -and $s.Status -eq "Running") { $isRunning = $true }
+        } else {
+            $p = Get-Process -Name $srv.Binary -ErrorAction SilentlyContinue
+            if ($p) { $isRunning = $true }
+        }
+
+        if ($isRunning) {
+            $status = "Corriendo"
+            $statusColor = "Green"
+            
+            # Intentar obtener puertos
+            $connections = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object {
+                $proc = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue
+                $proc -and ($proc.Name -like "*$($srv.Binary)*")
+            }
+            if ($connections) {
+                $ports = ($connections.LocalPort | Select-Object -Unique) -join ","
+            } else {
+                $ports = "Desconocido"
+            }
+        }
+
+        Write-Host ("{0,-15} | " -f $srv.Name) -NoNewline
+        Write-Host ("{0,-12}" -f $status) -ForegroundColor $statusColor -NoNewline
+        Write-Host (" | {0,-10}" -f $ports)
+    }
+    Write-Host "==========================================`n" -ForegroundColor Blue
 }

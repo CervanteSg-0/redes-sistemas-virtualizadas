@@ -30,6 +30,8 @@ Practica-07/
 2. Navegue al directorio: `cd Practica-07/scripts/linux`
 3. Ejecute con privilegios de root: `sudo ./main.sh`
    - *El script detectará automáticamente si requiere DNF o URPMI.*
+      Para cambio de puerto en NGINX
+      sudo sed -i 's/listen\s\+\[::\]:80;/listen [::]:5050;/' /etc/nginx/nginx.conf
 
 ### Windows (Server)
 1. Abra PowerShell como **Administrador**.

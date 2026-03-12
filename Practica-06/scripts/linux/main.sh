@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# Practica-07: main.sh
+# Practica-06: main.sh
 # Script principal para el aprovisionamiento web en Linux
 # ==============================================================================
 
@@ -22,8 +22,9 @@ show_menu() {
     echo "1. Instalar Apache2"
     echo "2. Instalar Nginx"
     echo "3. Instalar Tomcat (v9)"
-    echo "4. Bajar un servicio"
-    echo "5. Salir"
+    echo "4. Mostrar estado de los servicios"
+    echo "5. Bajar un servicio"
+    echo "6. Salir"
     echo -e "${GREEN}==========================================${NC}"
     read -p "Seleccione una opción: " OPTION
 }
@@ -53,6 +54,11 @@ while true; do
             VERSION="LTS (Repo)"
             ;;
         4)
+            check_services_status
+            read -p "Presione Enter para continuar..." dummy
+            continue
+            ;;
+        5)
             echo "Elija el servicio a bajar:"
             echo "1. Apache"
             echo "2. Nginx"
@@ -67,7 +73,7 @@ while true; do
             read -p "Presione Enter para continuar..." dummy
             continue
             ;;
-        5)
+        6)
             echo "Saliendo..."
             exit 0
             ;;
