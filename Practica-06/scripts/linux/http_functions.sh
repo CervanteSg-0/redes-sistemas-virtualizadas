@@ -133,11 +133,15 @@ install_apache() {
     # Fallback para rutas alternativas
     find /etc/apache2 -name "*.conf" -exec sed -i "s/^Listen\s\+[0-9]\+/Listen $port/g" {} + 2>/dev/null
     
-    # Asegurar directorio raíz antes de validar
-    mkdir -p /var/www/html
+    # Crear directorio raíz específico para Apache
+    local apache_root="/var/www/html/apache"
+    mkdir -p "$apache_root"
+    # Cambiar DocumentRoot en la configuración para que no choque con otros servicios
+    sed -i "s|DocumentRoot \"/var/www/html\"|DocumentRoot \"$apache_root\"|g" /etc/httpd/conf/httpd.conf
+    sed -i "s|<Directory \"/var/www/html\">|<Directory \"$apache_root\">|g" /etc/httpd/conf/httpd.conf
     
-    apply_security_config "httpd" "/var/www/html"
-    create_custom_index "Apache/Mageia" "Latest" "$port" "/var/www/html"
+    apply_security_config "httpd" "$apache_root"
+    create_custom_index "Apache/Mageia" "Latest" "$port" "$apache_root"
     
     # Firewall Mageia (firewalld)
     firewall-cmd --permanent --add-port=$port/tcp 2>/dev/null
@@ -161,11 +165,15 @@ install_nginx() {
     find /etc/nginx -name "*.conf" -exec sed -i "s/listen\s\+[0-9]\+/listen $port/g" {} +
     find /etc/nginx -name "*.conf" -exec sed -i "s/listen\s\+\[::\]:[0-9]\+;/listen [::]:$port;/g" {} +
     
-    # Asegurar directorio raíz antes de validar
-    mkdir -p /var/www/html
+    # Crear directorio raíz específico para Nginx
+    local nginx_root="/var/www/html/nginx"
+    mkdir -p "$nginx_root"
+    # Cambiar el path root en el archivo de configuración
+    sed -i "s|root\s\+/usr/share/nginx/html;|root $nginx_root;|g" /etc/nginx/nginx.conf
+    sed -i "s|root\s\+/var/www/html;|root $nginx_root;|g" /etc/nginx/nginx.conf
     
-    apply_security_config "nginx" "/var/www/html"
-    create_custom_index "Nginx/Mageia" "Latest" "$port" "/var/www/html"
+    apply_security_config "nginx" "$nginx_root"
+    create_custom_index "Nginx/Mageia" "Latest" "$port" "$nginx_root"
     
     firewall-cmd --permanent --add-port=$port/tcp 2>/dev/null
     firewall-cmd --reload 2>/dev/null
