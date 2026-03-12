@@ -65,18 +65,37 @@ apply_security_config() {
     case $service in
         apache2|httpd)
             local CONF="/etc/httpd/conf/httpd.conf"
-            [ ! -f "$CONF" ] && CONF="/etc/apache2/httpd.conf" # Fallback Mageia
+            [ ! -f "$CONF" ] && CONF="/etc/apache2/httpd.conf"
             
-            # Ocultar versión y firma
-            sed -i "s/^ServerTokens .*/ServerTokens Prod/" "$CONF" 2>/dev/null || echo "ServerTokens Prod" >> "$CONF"
-            sed -i "s/^ServerSignature .*/ServerSignature Off/" "$CONF" 2>/dev/null || echo "ServerSignature Off" >> "$CONF"
-            echo "TraceEnable Off" >> "$CONF"
+            # Ocultar versión y firma de forma segura (evita duplicados)
+            sed -i "s/^ServerTokens .*/ServerTokens Prod/" "$CONF" 2>/dev/null
+            grep -q "^ServerTokens Prod" "$CONF" || echo "ServerTokens Prod" >> "$CONF"
             
-            systemctl restart httpd
+            sed -i "s/^ServerSignature .*/ServerSignature Off/" "$CONF" 2>/dev/null
+            grep -q "^ServerSignature Off" "$CONF" || echo "ServerSignature Off" >> "$CONF"
+            
+            grep -q "^TraceEnable Off" "$CONF" || echo "TraceEnable Off" >> "$CONF"
+            
+            # Verificar sintaxis antes de intentar arrancar
+            echo -e "${BLUE}Validando configuración de Apache...${NC}"
+            if apachectl configtest &>/dev/null; then
+                systemctl restart httpd 2>/dev/null || systemctl restart apache2 2>/dev/null
+            else
+                echo -e "${RED}[ALERTA] Error de sintaxis en httpd.conf detectado:${NC}"
+                apachectl configtest
+            fi
             ;;
         nginx)
-            sed -i "s/# server_tokens off;/server_tokens off;/" /etc/nginx/nginx.conf
-            systemctl restart nginx
+            # Hardening Nginx
+            sed -i "s/server_tokens on;/server_tokens off;/" /etc/nginx/nginx.conf
+            grep -q "server_tokens off;" /etc/nginx/nginx.conf || sed -i '/http {/a \    server_tokens off;' /etc/nginx/nginx.conf
+            
+            if nginx -t &>/dev/null; then
+                systemctl restart nginx
+            else
+                echo -e "${RED}[ALERTA] Error de sintaxis en nginx.conf detectado.${NC}"
+                nginx -t
+            fi
             ;;
     esac
 }
