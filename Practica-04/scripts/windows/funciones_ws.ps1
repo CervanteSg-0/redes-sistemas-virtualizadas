@@ -34,58 +34,58 @@ function Modulo-SSH {
     Write-Host "      CONFIGURACION DE SERVICIO SSH          "
     Write-Host "============================================="
     
-    Write-Host "[*] Iniciando proceso de instalacion forzada de OpenSSH..."
+    Write-Host "[*] Iniciando proceso de instalacion de OpenSSH..."
     
-    # 1. Intentar instalar la capacidad nativa (Requiere Internet/Windows Update)
+    # Verificar conexion a internet
+    $internet = Test-Connection -ComputerName 8.8.8.8 -Count 1 -Quiet -ErrorAction SilentlyContinue
+    if (-not $internet) {
+        Write-Host "[!] ADVERTENCIA: No se detecto conexion a Internet." -ForegroundColor Yellow
+        Write-Host "    Windows necesita descargar los archivos de OpenSSH." -ForegroundColor Yellow
+    }
+
+    # 1. Intentar instalar via Capability
     try {
         $ssh = Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH.Server*'
         if ($ssh.State -ne 'Installed') {
-            Write-Host "[*] Agregando capacidad de OpenSSH Server via Windows Update..."
+            Write-Host "[*] Agregando capacidad de OpenSSH Server..."
             Add-WindowsCapability -Online -Name $ssh.Name -ErrorAction Stop | Out-Null
         }
     } catch {
-        Write-Host "[!] Fallo Windows Update. Intentando via Chocolatey (Metodo Alternativo)..." -ForegroundColor Yellow
-        if (Get-Command choco -ErrorAction SilentlyContinue) {
-            choco install openssh -y -params '"/SSHServerFeature"' | Out-Null
-        } else {
-            Write-Host "[!] Chocolatey no detectado. Intentando via DISM..." -ForegroundColor Yellow
-            dism /online /add-capability /capabilityname:OpenSSH.Server~~~~0.0.1.0 /NoRestart | Out-Null
-        }
+        Write-Host "[!] Fallo la instalacion nativa. Intentando via DISM..." -ForegroundColor Yellow
+        dism /online /add-capability /capabilityname:OpenSSH.Server~~~~0.0.1.0 /NoRestart | Out-Null
     }
 
     Write-Host "[*] Verificando existencia del servicio..."
-    Start-Sleep -Seconds 3
+    Start-Sleep -Seconds 2
     
-    $service = Get-Service -Name sshd -ErrorAction SilentlyContinue
-    if (-not $service) {
-        Write-Host "[!] El servicio no aparece. Buscando ejecutables locales..." -ForegroundColor Yellow
-        # Buscar en rutas comunes (Nativo o Chocolatey)
-        $paths = @("C:\Windows\System32\OpenSSH\sshd.exe", "C:\Program Files\OpenSSH-Win64\sshd.exe", "C:\Program Files\OpenSSH\sshd.exe")
-        $sshdExe = ""
-        foreach ($p in $paths) { if (Test-Path $p) { $sshdExe = $p; break } }
-
-        if ($sshdExe -ne "") {
-            Write-Host "[*] Archivo detectado en $sshdExe. Registrando manualmente..." -ForegroundColor Cyan
-            sc.exe create sshd binPath= $sshdExe start= auto displayname= "OpenSSH SSH Server" | Out-Null
-        } else {
-            Write-Host "[CRITICO] No se encontraron archivos de OpenSSH en ninguna ruta conocida." -ForegroundColor Red
-            Write-Host "[TIP] Tu VM parece no tener acceso a Windows Update. Por favor, asegúrate de tener internet o instala Chocolatey primero." -ForegroundColor Yellow
+    $sshd = Get-Service -Name sshd -ErrorAction SilentlyContinue
+    if (-not $sshd) {
+        Write-Host "[!] El servicio no aparece en la lista. Buscando archivos locales..." -ForegroundColor Yellow
+        $paths = @("$env:SystemRoot\System32\OpenSSH\sshd.exe", "$env:ProgramFiles\OpenSSH\sshd.exe")
+        $found = $false
+        foreach ($p in $paths) {
+            if (Test-Path $p) {
+                Write-Host "[*] Ejecutable detectado en $p. Registrando..." -ForegroundColor Cyan
+                sc.exe create sshd binPath= $p start= auto displayname= "OpenSSH SSH Server" | Out-Null
+                $found = $true; break
+            }
+        }
+        
+        if (-not $found) {
+            Write-Host "[CRITICO] No se encontraron los archivos de OpenSSH en el sistema." -ForegroundColor Red
+            Write-Host "[TIP] Tu VM NO tiene acceso a Internet o a Windows Update." -ForegroundColor Cyan
+            Write-Host "      Asegurate de que la red de la VM este en modo NAT/Puente con internet." -ForegroundColor Cyan
             Pausa-Tecla
             return
         }
     }
 
-    # Configurar y arrancar
-    $service = Get-Service -Name sshd -ErrorAction SilentlyContinue
-    if ($service) {
-        Write-Host "[OK] Servicio sshd encontrado. Configurando..." -ForegroundColor Green
+    # Encendido final
+    $sshd = Get-Service -Name sshd -ErrorAction SilentlyContinue
+    if ($sshd) {
+        Write-Host "[OK] Servicio SSH configurado correctamente." -ForegroundColor Green
         Set-Service -Name sshd -StartupType Automatic
         Start-Service sshd -ErrorAction SilentlyContinue
-        Write-Host "[OK] SSH listo y corriendo." -ForegroundColor Green
-    } else {
-        Write-Host "[!] No se pudo activar el servicio despues de todos los intentos." -ForegroundColor Red
-        Pausa-Tecla
-        return
     }
 
     Write-Host "[*] Verificando reglas del Firewall..."
@@ -97,7 +97,7 @@ function Modulo-SSH {
         Write-Host "[OK] La excepcion del Firewall ya existe."
     }
 
-    Write-Host "`n[OK] Servicio SSH habilitado y escuchando correctamente."
+    Write-Host "`n[OK] Servicio SSH habilitado y escuchando."
     Pausa-Tecla
 }
 
