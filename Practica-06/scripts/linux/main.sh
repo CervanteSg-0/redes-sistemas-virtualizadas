@@ -24,7 +24,8 @@ show_menu() {
     echo "3. Instalar Tomcat (v9)"
     echo "4. Mostrar estado de los servicios"
     echo "5. Bajar un servicio"
-    echo "6. Salir"
+    echo "6. Eliminar por completo un servicio (Purge)"
+    echo "7. Salir"
     echo -e "${GREEN}==========================================${NC}"
     read -p "Seleccione una opción: " OPTION
 }
@@ -74,6 +75,21 @@ while true; do
             continue
             ;;
         6)
+            echo "Elija el servicio a ELIMINAR por completo:"
+            echo "1. Apache"
+            echo "2. Nginx"
+            echo "3. Tomcat"
+            read -p "Opción: " PURGE_OPT
+            case $PURGE_OPT in
+                1) purge_services "apache2" ;;
+                2) purge_services "nginx" ;;
+                3) purge_services "tomcat" ;;
+                *) echo "Opción inválida" ;;
+            esac
+            read -p "Presione Enter para continuar..." dummy
+            continue
+            ;;
+        7)
             echo "Saliendo..."
             exit 0
             ;;

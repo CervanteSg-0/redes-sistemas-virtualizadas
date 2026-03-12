@@ -23,7 +23,8 @@ function Show-Menu {
     Write-Host "3. Instalar Nginx"
     Write-Host "4. Mostrar estado de los servicios"
     Write-Host "5. Bajar un servicio"
-    Write-Host "6. Salir"
+    Write-Host "6. Eliminar por completo un servicio (Purge)"
+    Write-Host "7. Salir"
     Write-Host "==========================================" -ForegroundColor Green
     $choice = Read-Host "Seleccione una opción"
     return $choice
@@ -73,6 +74,21 @@ while ($true) {
             continue
         }
         "6" {
+            Write-Host "Elija el servicio a ELIMINAR por completo:"
+            Write-Host "1. IIS"
+            Write-Host "2. Apache"
+            Write-Host "3. Nginx"
+            $purgeOpt = Read-Host "Opción"
+            switch ($purgeOpt) {
+                "1" { Clear-WindowsService -ServiceName "IIS" }
+                "2" { Clear-WindowsService -ServiceName "Apache" }
+                "3" { Clear-WindowsService -ServiceName "Nginx" }
+                Default { Write-Host "Opción inválida" }
+            }
+            Read-Host "Presione Enter para continuar..."
+            continue
+        }
+        "7" {
             Write-Host "Saliendo..."
             exit
         }

@@ -104,8 +104,8 @@ install_apache() {
     echo -e "${BLUE}Instalando Apache en Mageia...${NC}"
     dnf install -y apache 2>/dev/null || urpmi --auto apache
     
-    # Cambiar puerto de forma robusta (maneja cualquier cantidad de espacios)
-    sed -i "s/^Listen\s\+[0-9]\+/Listen $port/" /etc/httpd/conf/httpd.conf
+    # Cambiar puerto de forma infalible (maneja default_server y cualquier puerto previo)
+    sed -i "s/Listen\s\+[0-9]\+/Listen $port/g" /etc/httpd/conf/httpd.conf
     
     apply_security_config "httpd" "/var/www/html"
     create_custom_index "Apache/Mageia" "Latest" "$port" "/var/www/html"
@@ -127,9 +127,9 @@ install_nginx() {
     echo -e "${BLUE}Instalando Nginx en Mageia...${NC}"
     dnf install -y nginx 2>/dev/null || urpmi --auto nginx
     
-    # Cambiar puerto de forma robusta (IPv4 e IPv6, maneja cualquier número de puerto previo)
-    sed -i "s/listen\s\+[0-9]\+;/listen $port;/" /etc/nginx/nginx.conf
-    sed -i "s/listen\s\+\[::\]:[0-9]\+;/listen [::]:$port;/" /etc/nginx/nginx.conf
+    # Cambiar puerto de forma infalible (maneja default_server, IPv6 y cualquier puerto previo)
+    sed -i "s/listen\s\+[0-9]\+/listen $port/g" /etc/nginx/nginx.conf
+    sed -i "s/listen\s\+\[::\]:[0-9]\+/listen [::]:$port/g" /etc/nginx/nginx.conf
     
     apply_security_config "nginx" "/var/www/html"
     create_custom_index "Nginx/Mageia" "Latest" "$port" "/var/www/html"
@@ -242,4 +242,30 @@ check_services_status() {
         printf "%-15s | %-21s | %-10s\n" "$srv" "$status_text" "$ports"
     done
     echo -e "${BLUE}==========================================${NC}"
+}
+
+# Función para eliminación total de servicios (Purge)
+purge_services() {
+    local service=$1
+    echo -e "${RED}Eliminando por completo $service (registros, configs y binarios)...${NC}"
+    
+    case $service in
+        apache2|httpd)
+            systemctl stop httpd 2>/dev/null
+            dnf remove -y apache 2>/dev/null || urpme apache 2>/dev/null
+            rm -rf /etc/httpd /var/www/html /var/log/httpd
+            ;;
+        nginx)
+            systemctl stop nginx 2>/dev/null
+            dnf remove -y nginx 2>/dev/null || urpme nginx 2>/dev/null
+            rm -rf /etc/nginx /var/www/html /var/log/nginx /usr/share/nginx
+            ;;
+        tomcat)
+            systemctl stop tomcat 2>/dev/null
+            rm -rf /opt/tomcat /etc/systemd/system/tomcat.service
+            systemctl daemon-reload
+            if id "tomcat" &>/dev/null; then userdel -r tomcat 2>/dev/null; fi
+            ;;
+    esac
+    echo -e "${GREEN}Limpieza de $service completada.${NC}"
 }

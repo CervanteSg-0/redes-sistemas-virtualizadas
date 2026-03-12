@@ -194,3 +194,29 @@ function Get-ServicesStatus {
     }
     Write-Host "==========================================`n" -ForegroundColor Blue
 }
+
+# Función para eliminación total de servicios en Windows (Purge)
+function Clear-WindowsService {
+    param([string]$ServiceName)
+    Write-Host "ELIMINANDO por completo $ServiceName (archivos y registros)..." -ForegroundColor Red
+    
+    switch ($ServiceName) {
+        "IIS" {
+            # Deshabilitar característica de Windows
+            Disable-WindowsOptionalFeature -Online -FeatureName "IIS-WebServerRole", "IIS-WebServer" -NoRestart
+            # Intentar borrar carpeta si está vacía o con el index generado
+            if (Test-Path "C:\inetpub\wwwroot\index.html") { Remove-Item "C:\inetpub\wwwroot\index.html" -Force }
+        }
+        "Apache" {
+            Stop-Service -Name "Apache2.4" -ErrorAction SilentlyContinue
+            choco uninstall apache-httpd -y
+            if (Test-Path "C:\tools\apache24") { Remove-Item "C:\tools\apache24" -Recurse -Force }
+        }
+        "Nginx" {
+            Stop-Process -Name "nginx" -ErrorAction SilentlyContinue
+            choco uninstall nginx -y
+            if (Test-Path "C:\tools\nginx") { Remove-Item "C:\tools\nginx" -Recurse -Force }
+        }
+    }
+    Write-Host "Limpieza de $ServiceName completada." -ForegroundColor Green
+}
