@@ -44,7 +44,7 @@ function Install-IIS {
     Set-ItemProperty "IIS:\Sites\Default Web Site" -Name bindings -Value @{protocol="http";bindingInformation="*:${Port}:"}
     
     New-IndexPage -Service "IIS" -Version "LTS" -Port $Port -Path "C:\inetpub\wwwroot"
-    New-NetFirewallRule -DisplayName "HTTP-Practice-$Port" -LocalPort $Port -Protocol TCP -Action Allow -Force
+    New-NetFirewallRule -DisplayName "HTTP-Practice-${Port}" -LocalPort $Port -Protocol TCP -Action Allow
     Write-Host "IIS configurado correctamente en el puerto $Port" -ForegroundColor Green
 }
 
@@ -58,7 +58,7 @@ function Install-ApacheWindows {
         Add-Content $confPath "`nServerTokens Prod`nServerSignature Off"
     }
     New-IndexPage -Service "Apache" -Version $Version -Port $Port -Path "C:\tools\apache24\htdocs"
-    New-NetFirewallRule -DisplayName "Apache-Practice-$Port" -LocalPort $Port -Protocol TCP -Action Allow -Force
+    New-NetFirewallRule -DisplayName "Apache-Practice-${Port}" -LocalPort $Port -Protocol TCP -Action Allow
     Start-Service -Name "Apache2.4" -ErrorAction SilentlyContinue
     Write-Host "Apache configurado en el puerto $Port" -ForegroundColor Green
 }
@@ -73,7 +73,7 @@ function Install-NginxWindows {
         (Get-Content $confPath) -replace "server_tokens off;", "server_tokens off;" | Set-Content $confPath
     }
     New-IndexPage -Service "Nginx" -Version $Version -Port $Port -Path "C:\tools\nginx\html"
-    New-NetFirewallRule -DisplayName "Nginx-Practice-$Port" -LocalPort $Port -Protocol TCP -Action Allow -Force
+    New-NetFirewallRule -DisplayName "Nginx-Practice-${Port}" -LocalPort $Port -Protocol TCP -Action Allow
     Write-Host "Nginx configurado en el puerto $Port" -ForegroundColor Green
 }
 
