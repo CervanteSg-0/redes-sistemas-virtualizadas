@@ -25,9 +25,6 @@ function Ingresar-IP {
     }
 }
 
-# ------------------------------------------
-# MODULO SSH
-# ------------------------------------------
 function Modulo-SSH {
     Clear-Host
     Write-Host "============================================="
@@ -36,68 +33,69 @@ function Modulo-SSH {
     
     Write-Host "[*] Iniciando proceso de instalacion de OpenSSH..."
     
-    # Verificar conexion a internet
-    $internet = Test-Connection -ComputerName 8.8.8.8 -Count 1 -Quiet -ErrorAction SilentlyContinue
-    if (-not $internet) {
-        Write-Host "[!] ADVERTENCIA: No se detecto conexion a Internet." -ForegroundColor Yellow
-        Write-Host "    Windows necesita descargar los archivos de OpenSSH." -ForegroundColor Yellow
-    }
+    # Paso 1: Asegurar que Windows Update este encendido (necesario para instalar componentes)
+    Write-Host "[*] Asegurando servicio de Windows Update (wuauserv)..."
+    Set-Service -Name wuauserv -StartupType Manual -ErrorAction SilentlyContinue
+    Start-Service -Name wuauserv -ErrorAction SilentlyContinue
 
-    # 1. Intentar instalar via Capability
-    try {
-        $ssh = Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH.Server*'
-        if ($ssh.State -ne 'Installed') {
-            Write-Host "[*] Agregando capacidad de OpenSSH Server..."
-            Add-WindowsCapability -Online -Name $ssh.Name -ErrorAction Stop | Out-Null
+    # Paso 2: Intentar instalar via capacidad nativa
+    $sshCap = Get-WindowsCapability -Online | Where-Object Name -like "OpenSSH.Server*"
+    if ($null -ne $sshCap) {
+        if ($sshCap.State -ne "Installed") {
+            Write-Host "[*] Instalando $($sshCap.Name) desde servidores de Microsoft..."
+            try {
+                Add-WindowsCapability -Online -Name $sshCap.Name -ErrorAction Stop | Out-Null
+                Write-Host "[OK] Instalacion por capacidad completada." -ForegroundColor Green
+            } catch {
+                Write-Host "[!] Fallo la capacidad nativa. Intentando metodos alternativos..." -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host "[OK] El paquete ya figura como instalado."
         }
-    } catch {
-        Write-Host "[!] Fallo la instalacion nativa. Intentando via DISM..." -ForegroundColor Yellow
-        dism /online /add-capability /capabilityname:OpenSSH.Server~~~~0.0.1.0 /NoRestart | Out-Null
     }
 
-    Write-Host "[*] Verificando existencia del servicio..."
-    Start-Sleep -Seconds 2
+    # Paso 3: Fallback con Chocolatey (Si lo nativo no genero el servicio)
+    if (-not (Get-Service -Name sshd -ErrorAction SilentlyContinue)) {
+        Write-Host "[*] El servicio sshd no aparece. Intentando via Chocolatey..." -ForegroundColor Cyan
+        if (Get-Command choco -ErrorAction SilentlyContinue) {
+            choco install openssh -y -params '"/SSHServerFeature"' | Out-Null
+        } else {
+            Write-Host "[!] Chocolatey no detectado. Intentando DISM directo..." -ForegroundColor Yellow
+            dism /online /add-capability /capabilityname:OpenSSH.Server~~~~0.0.1.0 /NoRestart | Out-Null
+        }
+    }
+
+    Write-Host "[*] Verificando registro del servicio..."
+    Start-Sleep -Seconds 3
     
     $sshd = Get-Service -Name sshd -ErrorAction SilentlyContinue
-    if (-not $sshd) {
-        Write-Host "[!] El servicio no aparece en la lista. Buscando archivos locales..." -ForegroundColor Yellow
-        $paths = @("$env:SystemRoot\System32\OpenSSH\sshd.exe", "$env:ProgramFiles\OpenSSH\sshd.exe")
-        $found = $false
-        foreach ($p in $paths) {
-            if (Test-Path $p) {
-                Write-Host "[*] Ejecutable detectado en $p. Registrando..." -ForegroundColor Cyan
-                sc.exe create sshd binPath= $p start= auto displayname= "OpenSSH SSH Server" | Out-Null
-                $found = $true; break
-            }
-        }
-        
-        if (-not $found) {
-            Write-Host "[CRITICO] No se encontraron los archivos de OpenSSH en el sistema." -ForegroundColor Red
-            Write-Host "[TIP] Tu VM NO tiene acceso a Internet o a Windows Update." -ForegroundColor Cyan
-            Write-Host "      Asegurate de que la red de la VM este en modo NAT/Puente con internet." -ForegroundColor Cyan
+    if ($sshd) {
+        Write-Host "[OK] Servicio encontrado. Configurando arranque..." -ForegroundColor Green
+        Set-Service -Name sshd -StartupType Automatic
+        Start-Service sshd -ErrorAction SilentlyContinue
+    } else {
+        # Paso 4: Registro manual si los archivos existen en el disco
+        $exe = "$env:SystemRoot\System32\OpenSSH\sshd.exe"
+        if (Test-Path $exe) {
+            Write-Host "[*] Archivos detectados pero servicio no registrado. Registrando manualmente..." -ForegroundColor Yellow
+            sc.exe create sshd binPath= $exe start= auto displayname= "OpenSSH SSH Server" | Out-Null
+            Start-Service sshd -ErrorAction SilentlyContinue
+        } else {
+            Write-Host "[ERROR] El sistema no pudo descargar/instalar los archivos de OpenSSH." -ForegroundColor Red
+            Write-Host "[TIP] Intenta correr este comando manualmente: Add-WindowsCapability -Online -Name $($sshCap.Name)" -ForegroundColor Cyan
             Pausa-Tecla
             return
         }
     }
 
-    # Encendido final
-    $sshd = Get-Service -Name sshd -ErrorAction SilentlyContinue
-    if ($sshd) {
-        Write-Host "[OK] Servicio SSH configurado correctamente." -ForegroundColor Green
-        Set-Service -Name sshd -StartupType Automatic
-        Start-Service sshd -ErrorAction SilentlyContinue
-    }
-
-    Write-Host "[*] Verificando reglas del Firewall..."
-    $fwRule = Get-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -ErrorAction SilentlyContinue
-    if (-not $fwRule) {
+    # Paso 5: Firewall
+    Write-Host "[*] Configurando Firewall..."
+    if (-not (Get-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -ErrorAction SilentlyContinue)) {
         New-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -DisplayName "OpenSSH Server (sshd)" -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 | Out-Null
-        Write-Host "[OK] Se agrego la excepcion al Firewall."
-    } else {
-        Write-Host "[OK] La excepcion del Firewall ya existe."
+        Write-Host "[OK] Regla de Firewall creada."
     }
 
-    Write-Host "`n[OK] Servicio SSH habilitado y escuchando."
+    Write-Host "`n[FIN] Proceso de SSH terminado."
     Pausa-Tecla
 }
 
