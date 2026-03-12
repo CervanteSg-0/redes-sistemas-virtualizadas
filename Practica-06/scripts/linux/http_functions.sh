@@ -88,12 +88,16 @@ create_custom_index() {
     local port=$3
     local path=$4
     
+    # Asegurar que el directorio existe (evita errores tras una purga)
+    mkdir -p "$path"
+    
     cat <<EOF > "$path/index.html"
 Servidor: $service
 Versión: $version
 Puerto: $port
 EOF
-    chown -R www-data:www-data "$path" 2>/dev/null
+    # Ajustar permisos para Mageia (apache) y fallback para otros (www-data)
+    chown -R apache:apache "$path" 2>/dev/null || chown -R www-data:www-data "$path" 2>/dev/null
 }
 
 # Instalación de Apache (Mageia: apache)
