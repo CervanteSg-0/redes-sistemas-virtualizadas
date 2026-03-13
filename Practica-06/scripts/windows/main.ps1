@@ -48,25 +48,23 @@ function Install-IIS {
         if ($site) {
             Write-Host "[*] Aplicando puerto $Port a $($site.Name)..." -ForegroundColor Cyan
             # Forzar binding completo: protocolo:ip:puerto:nombre_host
-            Set-ItemProperty "IIS:\Sites\$($site.Name)" -Name bindings -Value @{protocol="http";bindingInformation="*:${Port}:"}
-            Set-ItemProperty "IIS:\Sites\$($site.Name)" -Name serverAutoStart -Value $true
-        } else {
-            New-Website -Name "Default Web Site" -Port $Port -PhysicalPath "C:\inetpub\wwwroot" -Force | Out-Null
-        }
-        
         # Reiniciar IIS para aplicar cambios
         Write-Host "[*] Reiniciando servicios de IIS..." -ForegroundColor Yellow
         iisreset /restart | Out-Null
+        Start-Sleep -Seconds 2
+        
+        # Asegurar que el sitio este encendido
+        if ($site) { Start-Website -Name "$($site.Name)" -ErrorAction SilentlyContinue }
         
         New-IndexPage -Service "IIS" -Version "LTS" -Port $Port -Path "C:\inetpub\wwwroot"
         
-        # Abrir Firewall (Limpieza agresiva por puerto)
-        $ruleName = "HTTP-Practice-${Port}"
-        Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "HTTP-Practice-*" -or $_.DisplayName -eq $ruleName } | Remove-NetFirewallRule -ErrorAction SilentlyContinue
+        # Abrir Firewall (Limpieza y apertura en todos los perfiles)
+        Write-Host "[*] Abriendo Firewall para puerto $Port (Perfiles: Any)..." -ForegroundColor Cyan
+        Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "HTTP-Practice-*" } | Remove-NetFirewallRule -ErrorAction SilentlyContinue
         
-        New-NetFirewallRule -DisplayName $ruleName -LocalPort $Port -Protocol TCP -Action Allow -Direction Inbound -Description "Acceso forzado para Practica 06" | Out-Null
+        New-NetFirewallRule -Name "HTTP-Practice-$Port" -DisplayName "HTTP-Practice-$Port" -LocalPort $Port -Protocol TCP -Action Allow -Direction Inbound -Profile Any -Enabled True | Out-Null
         
-        Write-Host "[OK] IIS configurado y puerto $Port abierto en Firewall." -ForegroundColor Green
+        Write-Host "[OK] IIS configurado y puerto $Port abierto en todos los perfiles." -ForegroundColor Green
     } catch {
         Write-Host "[!] Error al configurar IIS: $_" -ForegroundColor Red
     }
