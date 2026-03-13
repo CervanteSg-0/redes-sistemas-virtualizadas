@@ -5,7 +5,7 @@
 # Forzar codificacion UTF8 para evitar simbolos extraños
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
-# --- LIBRERIA DE FUNCIONES INTEGRADAS (PARA EVITAR ERRORES DE RUTA) ---
+# --- LIBRERIA DE FUNCIONES INTEGRADAS ---
 
 function Test-PortAvailability {
     param([int]$Port)
@@ -20,19 +20,12 @@ function Test-IsReservedPort {
     return $false
 }
 
-function Get-ServiceVersions {
-    param([string]$PackageName)
-    Write-Host "Consultando versiones para $PackageName en Chocolatey..." -ForegroundColor Blue
-    $versions = choco search $PackageName --all | Select-String -Pattern "$PackageName\s+([\d\.]+)" | Select-Object -First 5
-    return $versions
-}
-
 function New-IndexPage {
     param([string]$Service, [string]$Version, [int]$Port, [string]$Path)
     $html = "Servidor: $Service`nVersion: $Version`nPuerto: $Port"
-    if (-not (Test-Path $Path)) { New-Item -Path $Path -ItemType Directory -Force }
+    if (-not (Test-Path $Path)) { New-Item -Path $Path -ItemType Directory -Force | Out-Null }
     Set-Content -Path (Join-Path $Path "index.html") -Value $html -Force
-    Write-Host "Pagina de index creada en $Path" -ForegroundColor Gray
+    Write-Host "[*] Pagina de index creada en $Path" -ForegroundColor Gray
 }
 
 function Install-IIS {
@@ -40,63 +33,81 @@ function Install-IIS {
     Write-Host "`n[*] Habilitando IIS (Internet Information Services)..." -ForegroundColor Blue
     try {
         Enable-WindowsOptionalFeature -Online -FeatureName "IIS-WebServerRole", "IIS-WebServer", "IIS-CommonHttpFeatures" -NoRestart -ErrorAction SilentlyContinue | Out-Null
-        Import-Module WebAdministration
+        Import-Module WebAdministration -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 2
         
-        # Detectar sitio
+        # Detectar sitio existe
         $site = Get-Website | Select-Object -First 1
         if ($site) {
             Write-Host "[*] Aplicando puerto $Port a $($site.Name)..." -ForegroundColor Cyan
-            # Forzar binding completo: protocolo:ip:puerto:nombre_host
-        # Reiniciar IIS para aplicar cambios
-        Write-Host "[*] Reiniciando servicios de IIS..." -ForegroundColor Yellow
+            Set-ItemProperty "IIS:\Sites\$($site.Name)" -Name bindings -Value @{protocol="http";bindingInformation="*:${Port}:"}
+            Set-ItemProperty "IIS:\Sites\$($site.Name)" -Name serverAutoStart -Value $true
+        } else {
+            Write-Host "[*] Creando nuevo sitio Default Web Site..." -ForegroundColor Cyan
+            New-Website -Name "Default Web Site" -Port $Port -PhysicalPath "C:\inetpub\wwwroot" -Force | Out-Null
+        }
+        
+        # Reiniciar IIS
+        Write-Host "[*] Reiniciando servicios de IIS (iisreset)..." -ForegroundColor Yellow
         iisreset /restart | Out-Null
         Start-Sleep -Seconds 2
         
-        # Asegurar que el sitio este encendido
-        if ($site) { Start-Website -Name "$($site.Name)" -ErrorAction SilentlyContinue }
+        # Asegurar encendido
+        Start-Website -Name "*" -ErrorAction SilentlyContinue
         
         New-IndexPage -Service "IIS" -Version "LTS" -Port $Port -Path "C:\inetpub\wwwroot"
         
-        # Abrir Firewall (Limpieza y apertura en todos los perfiles)
+        # Firewall Extremo
         Write-Host "[*] Abriendo Firewall para puerto $Port (Perfiles: Any)..." -ForegroundColor Cyan
         Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "HTTP-Practice-*" } | Remove-NetFirewallRule -ErrorAction SilentlyContinue
-        
         New-NetFirewallRule -Name "HTTP-Practice-$Port" -DisplayName "HTTP-Practice-$Port" -LocalPort $Port -Protocol TCP -Action Allow -Direction Inbound -Profile Any -Enabled True | Out-Null
         
-        Write-Host "[OK] IIS configurado y puerto $Port abierto en todos los perfiles." -ForegroundColor Green
+        Write-Host "[OK] IIS configurado y accesible en el puerto $Port" -ForegroundColor Green
     } catch {
-        Write-Host "[!] Error al configurar IIS: $_" -ForegroundColor Red
+        Write-Host "[!] Error critico al configurar IIS: $_" -ForegroundColor Red
     }
 }
 
 function Install-ApacheWindows {
     param([string]$Version, [int]$Port)
-    Write-Host "Instalando Apache version $Version..." -ForegroundColor Blue
-    choco install apache-httpd --version $Version -y
+    Write-Host "`n[*] Instalando Apache version $Version..." -ForegroundColor Blue
+    if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
+        Write-Host "[!] Chocolatey no detectado. Instala choco primero." -ForegroundColor Red; return
+    }
+    choco install apache-httpd --version $Version -y | Out-Null
     $confPath = "C:\tools\apache24\conf\httpd.conf"
     if (Test-Path $confPath) {
         (Get-Content $confPath) -replace "^Listen\s+\d+", "Listen $Port" | Set-Content $confPath
         Add-Content $confPath "`nServerTokens Prod`nServerSignature Off"
     }
     New-IndexPage -Service "Apache" -Version $Version -Port $Port -Path "C:\tools\apache24\htdocs"
-    New-NetFirewallRule -DisplayName "Apache-Practice-${Port}" -LocalPort $Port -Protocol TCP -Action Allow
-    Start-Service -Name "Apache2.4" -ErrorAction SilentlyContinue
-    Write-Host "Apache configurado en el puerto $Port" -ForegroundColor Green
+    
+    Remove-NetFirewallRule -DisplayName "Apache-Practice-*" -ErrorAction SilentlyContinue | Out-Null
+    New-NetFirewallRule -DisplayName "Apache-Practice-${Port}" -LocalPort $Port -Protocol TCP -Action Allow -Direction Inbound -Profile Any | Out-Null
+    
+    Restart-Service -Name "Apache2.4" -ErrorAction SilentlyContinue
+    Write-Host "[OK] Apache configurado en el puerto $Port" -ForegroundColor Green
 }
 
 function Install-NginxWindows {
     param([string]$Version, [int]$Port)
-    Write-Host "Instalando Nginx version $Version..." -ForegroundColor Blue
-    choco install nginx --version $Version -y
+    Write-Host "`n[*] Instalando Nginx version $Version..." -ForegroundColor Blue
+    if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
+        Write-Host "[!] Chocolatey no detectado." -ForegroundColor Red; return
+    }
+    choco install nginx --version $Version -y | Out-Null
     $confPath = "C:\tools\nginx\conf\nginx.conf"
     if (Test-Path $confPath) {
-        (Get-Content $confPath) -replace "listen\s+\d+;", "listen $Port;" | Set-Content $confPath
-        (Get-Content $confPath) -replace "server_tokens off;", "server_tokens off;" | Set-Content $confPath
+        $content = Get-Content $confPath
+        $content = $content -replace "listen\s+\d+;", "listen $Port;"
+        $content | Set-Content $confPath
     }
     New-IndexPage -Service "Nginx" -Version $Version -Port $Port -Path "C:\tools\nginx\html"
-    New-NetFirewallRule -DisplayName "Nginx-Practice-${Port}" -LocalPort $Port -Protocol TCP -Action Allow
-    Write-Host "Nginx configurado en el puerto $Port" -ForegroundColor Green
+    
+    Remove-NetFirewallRule -DisplayName "Nginx-Practice-*" -ErrorAction SilentlyContinue | Out-Null
+    New-NetFirewallRule -DisplayName "Nginx-Practice-${Port}" -LocalPort $Port -Protocol TCP -Action Allow -Direction Inbound -Profile Any | Out-Null
+    
+    Write-Host "[OK] Nginx instalado en puerto $Port. (Ejecuta el binario para iniciar)" -ForegroundColor Green
 }
 
 function Get-ServicesStatus {
@@ -104,27 +115,35 @@ function Get-ServicesStatus {
     Write-Host "       ESTADO DE LOS SERVICIOS WEB        " -ForegroundColor Blue
     Write-Host "==========================================" -ForegroundColor Blue
     Write-Host ("{0,-15} | {1,-12} | {2,-10}" -f "SERVICIO", "ESTADO", "PUERTO(S)")
+    
     $services = @(
         @{Name="IIS"; Binary="w3wp"; SrvName="W3SVC"},
         @{Name="Apache"; Binary="httpd"; SrvName="Apache2.4"},
         @{Name="Nginx"; Binary="nginx"; SrvName=""}
     )
+    
     foreach ($srv in $services) {
         $status = "Detenido"; $color = "Red"; $ports = "-"
         $isRunning = $false
         if ($srv.SrvName -ne "") {
             $s = Get-Service -Name $srv.SrvName -ErrorAction SilentlyContinue
             if ($s -and $s.Status -eq "Running") { $isRunning = $true }
-        } else { if (Get-Process -Name $srv.Binary -ErrorAction SilentlyContinue) { $isRunning = $true } }
+        } else {
+            if (Get-Process -Name $srv.Binary -ErrorAction SilentlyContinue) { $isRunning = $true }
+        }
+        
         if ($isRunning) {
             $status = "Corriendo"; $color = "Green"
             if ($srv.Name -eq "IIS") {
                 try {
-                    Import-Module WebAdministration
+                    Import-Module WebAdministration -ErrorAction SilentlyContinue
                     $ports = (Get-WebBinding -Protocol "http").bindingInformation.Split(":")[1] -join ","
-                } catch { $ports = "Error" }
+                } catch { $ports = "?" }
             } else {
-                $conns = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { (Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).Name -like "*$($srv.Binary)*" }
+                $conns = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { 
+                    $proc = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue
+                    $proc.Name -like "*$($srv.Binary)*"
+                }
                 $ports = ($conns.LocalPort | Select-Object -Unique) -join ","
             }
         }
@@ -137,33 +156,32 @@ function Get-ServicesStatus {
 function Stop-WindowsService {
     param([string]$ServiceName)
     switch ($ServiceName) {
-        "IIS" { Stop-Service -Name "W3SVC" -ErrorAction SilentlyContinue }
+        "IIS" { Stop-Service -Name "W3SVC" -ErrorAction SilentlyContinue; iisreset /stop | Out-Null }
         "Apache" { Stop-Service -Name "Apache2.4" -ErrorAction SilentlyContinue }
         "Nginx" { Stop-Process -Name "nginx" -ErrorAction SilentlyContinue }
     }
-    Write-Host "Servicio $ServiceName detenido." -ForegroundColor Green
+    Write-Host "[OK] Servicio $ServiceName detenido." -ForegroundColor Green
 }
 
 function Clear-WindowsService {
     param([string]$ServiceName)
-    Write-Host "Limpiando rastros de $ServiceName..." -ForegroundColor Red
+    Write-Host "[!] Eliminando por completo $ServiceName..." -ForegroundColor Red
     switch ($ServiceName) {
         "IIS" { 
-            Disable-WindowsOptionalFeature -Online -FeatureName "IIS-WebServerRole", "IIS-WebServer" -NoRestart
-            if (Test-Path "C:\inetpub\wwwroot\index.html") { Remove-Item "C:\inetpub\wwwroot\index.html" -Force }
+            Disable-WindowsOptionalFeature -Online -FeatureName "IIS-WebServerRole" -NoRestart | Out-Null
         }
         "Apache" { 
             Stop-Service -Name "Apache2.4" -ErrorAction SilentlyContinue
-            choco uninstall apache-httpd -y; 
+            choco uninstall apache-httpd -y | Out-Null
             if (Test-Path "C:\tools\apache24") { Remove-Item "C:\tools\apache24" -Recurse -Force -ErrorAction SilentlyContinue }
         }
         "Nginx" { 
             Stop-Process -Name "nginx" -ErrorAction SilentlyContinue
-            choco uninstall nginx -y; 
+            choco uninstall nginx -y | Out-Null
             if (Test-Path "C:\tools\nginx") { Remove-Item "C:\tools\nginx" -Recurse -Force -ErrorAction SilentlyContinue }
         }
     }
-    Write-Host "Limpieza de $ServiceName completada." -ForegroundColor Green
+    Write-Host "[OK] Purga de $ServiceName completada." -ForegroundColor Green
 }
 
 # --- LOGICA DEL MENU ---
@@ -173,7 +191,7 @@ while ($true) {
     Write-Host "==========================================" -ForegroundColor Green
     Write-Host "   SISTEMA DE APROVISIONAMIENTO WEB (WIN)   " -ForegroundColor Green
     Write-Host "==========================================" -ForegroundColor Green
-    Write-Host "1. Instalar IIS (Obligatorio)"
+    Write-Host "1. Instalar IIS"
     Write-Host "2. Instalar Apache"
     Write-Host "3. Instalar Nginx"
     Write-Host "4. Mostrar estado de los servicios"
@@ -182,48 +200,48 @@ while ($true) {
     Write-Host "7. Salir"
     Write-Host "==========================================" -ForegroundColor Green
     
-    $opt = Read-Host "Seleccione una opcion"
+    $opt = Read-Host "Cual es tu opcion?"
     
     switch ($opt) {
         "1" {
-            $port = Read-Host "Ingrese el puerto para IIS"
+            $port = Read-Host "Puerto para IIS?"
             if (Test-IsReservedPort $port) { Write-Host "Puerto invalido"; Start-Sleep 2; continue }
             Install-IIS $port
-            Read-Host "Enter para continuar..."
+            Read-Host "Presiona Enter..."
         }
         "2" {
-            $port = Read-Host "Ingrese el puerto para Apache"
+            $port = Read-Host "Puerto para Apache?"
             if (Test-IsReservedPort $port) { Write-Host "Puerto invalido"; Start-Sleep 2; continue }
             Install-ApacheWindows "2.4.58" $port
-            Read-Host "Enter para continuar..."
+            Read-Host "Presiona Enter..."
         }
         "3" {
-            $port = Read-Host "Ingrese el puerto para Nginx"
+            $port = Read-Host "Puerto para Nginx?"
             if (Test-IsReservedPort $port) { Write-Host "Puerto invalido"; Start-Sleep 2; continue }
             Install-NginxWindows "1.24.0" $port
-            Read-Host "Enter para continuar..."
+            Read-Host "Presiona Enter..."
         }
         "4" {
             Get-ServicesStatus
-            Read-Host "`nPresione Enter para continuar..."
+            Read-Host "`nPresiona Enter..."
         }
         "5" {
             Write-Host "1.IIS 2.Apache 3.Nginx"
-            $s = Read-Host "Opcion"
+            $s = Read-Host "Cual bajas?"
             if($s -eq "1"){ Stop-WindowsService "IIS" }
             elseif($s -eq "2"){ Stop-WindowsService "Apache" }
             elseif($s -eq "3"){ Stop-WindowsService "Nginx" }
-            Read-Host "Enter para continuar..."
+            Read-Host "Presiona Enter..."
         }
         "6" {
             Write-Host "1.IIS 2.Apache 3.Nginx"
-            $p = Read-Host "Opcion para eliminacion total"
+            $p = Read-Host "Cual eliminas (PURGE)?"
             if($p -eq "1"){ Clear-WindowsService "IIS" }
             elseif($p -eq "2"){ Clear-WindowsService "Apache" }
             elseif($p -eq "3"){ Clear-WindowsService "Nginx" }
-            Read-Host "Enter para continuar..."
+            Read-Host "Presiona Enter..."
         }
         "7" { exit }
-        Default { Write-Host "Opcion no valida"; Start-Sleep 1 }
+        Default { Write-Host "Opcion invalida"; Start-Sleep 1 }
     }
 }
