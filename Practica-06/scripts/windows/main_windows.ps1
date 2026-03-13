@@ -41,21 +41,30 @@ function Set-IIS {
     Info "Configurando IIS..."
     if (-not (Get-WindowsFeature -Name Web-Server).Installed) { Install-WindowsFeature -Name Web-Server | Out-Null }
     Import-Module WebAdministration
-    iisreset /stop | Out-Null
     
-    # Requerimiento: Set-WebBinding
-    Get-WebBinding -Name "Default Web Site" | Remove-WebBinding -ErrorAction SilentlyContinue
-    New-WebBinding -Name "Default Web Site" -IPAddress "*" -Port $Port -Protocol "http" | Out-Null
+    # Asegurar que los servicios esten activos para que el proveedor IIS: funcione
+    Start-Service AppHostSvc, WAS, W3SVC -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 1
+
+    # RECONSTRUCCIÓN DEL SITIO (Solución definitiva al error de 'Object Not Found')
+    if (Get-Website -Name "Default Web Site" -ErrorAction SilentlyContinue) {
+        Remove-Website -Name "Default Web Site" | Out-Null
+    }
+    New-Website -Name "Default Web Site" -Port $Port -PhysicalPath $script:IisSitePath -Force | Out-Null
+    
+    # Aplicar Binding segun requerimiento con AppCmd (mas robusto)
+    $appcmd = "$env:SystemRoot\system32\inetsrv\appcmd.exe"
+    & $appcmd set site "Default Web Site" /bindings:http/*:${Port}: | Out-Null
     
     # Hardening
-    $appcmd = "$env:SystemRoot\system32\inetsrv\appcmd.exe"
     & $appcmd set config /section:httpProtocol /-"customHeaders.[name='X-Powered-By']" /commit:apphost 2>$null
     & $appcmd set config /section:httpProtocol /+"customHeaders.[name='X-Frame-Options',value='SAMEORIGIN']" /commit:apphost 2>$null
+    & $appcmd set config /section:httpProtocol /+"customHeaders.[name='X-Content-Type-Options',value='nosniff']" /commit:apphost 2>$null
     
     Create-IndexHtml -Path $script:IisSitePath -Srv "IIS" -Ver "LTS" -Port $Port
     Set-RestrictedSecurity -Path $script:IisSitePath
     
-    iisreset /start | Out-Null
+    iisreset /restart | Out-Null
     Exito "IIS listo en puerto $Port"
 }
 
