@@ -1,31 +1,4 @@
-[9:34 p. m., 12/3/2026] Oscar Vazquez: # ==============================================================================
-# http_functions.ps1 - Libreria de funciones HTTP para Windows Server
-# Practica 6 | Windows Server 2022
-# Ejecucion: PowerShell directo como Administrador
-# Gestor de paquetes: deteccion automatica Winget -> Chocolatey -> instala Choco
 # ==============================================================================
-
-# ------------------------------------------------------------------------------
-# FUNCIONES DE SALIDA / LOG
-# ------------------------------------------------------------------------------
-
-function Write-Info    { param($msg) Write-Host "[INFO]  $msg" -ForegroundColor Cyan    }
-function Write-Ok      { param($msg) Write-Host "[OK]    $msg" -ForegroundColor Green  …
-[9:34 p. m., 12/3/2026] Oscar Vazquez: # ==============================================================================
-# http_functions.ps1 - Libreria de funciones HTTP para Windows Server
-# Practica 6 | Windows Server 2022
-# Ejecucion: PowerShell directo como Administrador
-# Gestor de paquetes: deteccion automatica Winget -> Chocolatey -> instala Choco
-# ==============================================================================
-
-# ------------------------------------------------------------------------------
-# FUNCIONES DE SALIDA / LOG
-# ------------------------------------------------------------------------------
-
-function Write-Info    { param($msg) Write-Host "[INFO]  $msg" -ForegroundColor Cyan    }
-function Write-Ok      { param($msg) Write-Host "[OK]    $msg" -ForegroundColor Green  
-este es el de http funciones
-[9:34 p. m., 12/3/2026] Oscar Vazquez: # ==============================================================================
 # menu_windows.ps1 - Menu interactivo de aprovisionamiento HTTP
 # Practica 6 | Windows Server 2022 | PowerShell como Administrador
 # MAIN SCRIPT: solo contiene llamadas a funciones de http_functions.ps1
@@ -537,5 +510,3 @@ function Main {
         Read-Host "  Presiona ENTER para volver al menu"
     }
 }
-
-Main
