@@ -61,7 +61,7 @@ iisreset /start
 & $appcmd start site "Default Web Site" 2>$null
 
 Write-Host "`n[OK] IIS configurado en puerto $p" -ForegroundColor Green
-Write-Host "[!] Prueba entrar a: http://$TargetIP:$p" -ForegroundColor White
+Write-Host "[!] Prueba entrar a: http://${TargetIP}:${p}" -ForegroundColor White
 
 Write-Host "`nValidando conexion..."
 Test-NetConnection -ComputerName $TargetIP -Port $p
