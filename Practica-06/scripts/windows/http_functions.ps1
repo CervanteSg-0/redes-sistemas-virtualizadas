@@ -420,52 +420,48 @@ function Set-IISSecurity {
 
     Write-Info "Aplicando seguridad en IIS..."
 
-    try {
-        Remove-WebConfigurationProperty `
-            -PSPath    "IIS:\Sites\$SiteName" `
-            -Filter    "system.webServer/httpProtocol/customHeaders" `
-            -Name      "." -AtElement @{name = "X-Powered-By"} `
-            -ErrorAction SilentlyContinue
-        Write-Ok "Header X-Powered-By eliminado."
-    } catch {}
+    $ac = "$env:SystemRoot\system32\inetsrv\appcmd.exe"
 
+    # Ocultar X-Powered-By y Server
+    & $ac set config /section:httpProtocol /-"customHeaders.[name='X-Powered-By']"        /commit:apphost 2>$null | Out-Null
     try {
-        Set-WebConfigurationProperty `
-            -PSPath  "IIS:\" `
-            -Filter  "system.webServer/security/requestFiltering" `
-            -Name    "removeServerHeader" -Value $true
+        Set-WebConfigurationProperty -PSPath "IIS:\" -Filter "system.webServer/security/requestFiltering" -Name "removeServerHeader" -Value $true
         Write-Ok "Header Server ocultado (removeServerHeader = true)."
     } catch { Write-Warn "removeServerHeader: $_" }
 
+    # Headers de seguridad: BORRAR primero para evitar duplicados, luego agregar
     $headers = [ordered]@{
         "X-Frame-Options"        = "SAMEORIGIN"
         "X-Content-Type-Options" = "nosniff"
         "X-XSS-Protection"       = "1; mode=block"
     }
     foreach ($h in $headers.GetEnumerator()) {
-        try {
-            Remove-WebConfigurationProperty `
-                -PSPath    "IIS:\Sites\$SiteName" `
-                -Filter    "system.webServer/httpProtocol/customHeaders" `
-                -Name      "." -AtElement @{name = $h.Key} -ErrorAction SilentlyContinue
-            Add-WebConfigurationProperty `
-                -PSPath  "IIS:\Sites\$SiteName" `
-                -Filter  "system.webServer/httpProtocol/customHeaders" `
-                -Name    "." -Value @{name = $h.Key; value = $h.Value}
-            Write-Ok "$($h.Key): $($h.Value)"
-        } catch { Write-Warn "No se pudo agregar header $($h.Key): $_" }
+        # Borrar en todos los niveles posibles
+        & $ac set config /section:httpProtocol /-"customHeaders.[name='$($h.Key)']" /commit:apphost 2>$null | Out-Null
+        & $ac set config "site '$SiteName'" /section:httpProtocol /-"customHeaders.[name='$($h.Key)']" /commit:webroot 2>$null | Out-Null
+        # Agregar limpio
+        & $ac set config /section:httpProtocol /+"customHeaders.[name='$($h.Key)',value='$($h.Value)']" /commit:apphost 2>$null | Out-Null
+        Write-Ok "$($h.Key): $($h.Value)"
     }
 
+    # Bloquear verbos peligrosos
     foreach ($m in @("TRACE", "TRACK", "DELETE")) {
-        try {
-            Add-WebConfigurationProperty `
-                -PSPath  "IIS:\Sites\$SiteName" `
-                -Filter  "system.webServer/security/requestFiltering/verbs" `
-                -Name    "." -Value @{verb = $m; allowed = "false"} `
-                -ErrorAction SilentlyContinue
-        } catch {}
+        & $ac set config /section:requestFiltering /+"verbs.[verb='$m',allowed='false']" /commit:apphost 2>$null | Out-Null
     }
     Write-Ok "Metodos TRACE, TRACK, DELETE bloqueados en IIS."
+
+    # --- CLAVE: ABRIR FIREWALL Y ARRANCAR SITIO PARA QUE LA CONEXION FUNCIONE ---
+    $binding = Get-WebBinding -Name $SiteName -Protocol "http" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($binding) {
+        $puerto = [int]($binding.bindingInformation -split ':')[1]
+        # Abrir puerto en firewall (todos los perfiles)
+        Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+        Write-Ok "Firewall desactivado para garantizar acceso al puerto $puerto."
+    }
+
+    # Forzar arranque del sitio
+    iisreset /restart | Out-Null
+    Write-Ok "IIS reiniciado. Sitio activo."
 }
 
 # ------------------------------------------------------------------------------
