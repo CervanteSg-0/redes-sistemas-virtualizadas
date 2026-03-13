@@ -1,98 +1,81 @@
 # ==============================================================================
-# Practica-06: main.ps1 - SOLUCION DEFINITIVA (FORCED WRITE)
+# Practica-06: main.ps1 - VERSION PROFESIONAL Y ROBUSTA
 # ==============================================================================
 
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
 function New-IndexPage {
     param([string]$Service, [string]$Version, [int]$Port, [string]$Path)
-    $html = "Servidor: $Service`nVersion: $Version`nPuerto: $Port"
+    $html = "<html><body style='font-family:Arial;text-align:center;'><h1>Servidor $Service Listo</h1><h2>Puerto: $Port</h2></body></html>"
     if (-not (Test-Path $Path)) { New-Item -Path $Path -ItemType Directory -Force | Out-Null }
     Set-Content -Path (Join-Path $Path "index.html") -Value $html -Force
 }
 
 function Install-IIS {
     param([int]$Port)
-    Write-Host "`n[*] Aplicando configuracion de IIS (Modo Forzado)..." -ForegroundColor Blue
+    Write-Host "`n[*] Configurando IIS en puerto universal ${Port}..." -ForegroundColor Blue
     try {
-        # 1. Habilitar caracteristica básica
-        Enable-WindowsOptionalFeature -Online -FeatureName "IIS-WebServerRole", "IIS-WebServer", "IIS-CommonHttpFeatures" -NoRestart | Out-Null
+        Import-Module WebAdministration -ErrorAction SilentlyContinue
+        Enable-WindowsOptionalFeature -Online -FeatureName "IIS-WebServerRole", "IIS-WebServer" -NoRestart | Out-Null
         
-        # 2. DETENER IIS POR COMPLETO (Para liberar el archivo applicationHost.config)
-        Write-Host "[*] Deteniendo servicios para liberar archivos..." -ForegroundColor Yellow
-        Stop-Service W3SVC -ErrorAction SilentlyContinue
-        Stop-Service WAS -Force -ErrorAction SilentlyContinue
-        Start-Sleep -Seconds 2
+        # 1. Identificar sitio
+        $site = Get-Website | Select-Object -First 1
+        $sn = if ($site) { $site.Name } else { "Default Web Site" }
 
-        # 3. Realizar cambios con el motor apagado
-        Import-Module WebAdministration
-        $siteName = (Get-Website | Select-Object -First 1).Name
-        if (-not $siteName) { $siteName = "Default Web Site" }
-
-        # Usar apccmd para asegurar la escritura fisica
-        $appcmd = "$env:SystemRoot\system32\inetsrv\appcmd.exe"
-        if (Test-Path $appcmd) {
-            # Limpiar bindings previos y poner el nuevo
-            & $appcmd set site /site.name:"$siteName" /bindings:http/*:${Port}: | Out-Null
-        } else {
-            # Fallback a PowerShell si no hay appcmd
-            if (-not (Get-Website -Name "$siteName" -ErrorAction SilentlyContinue)) {
-                New-Website -Name "$siteName" -Port $Port -PhysicalPath "C:\inetpub\wwwroot" -Force | Out-Null
-            } else {
-                Set-ItemProperty "IIS:\Sites\$siteName" -Name bindings -Value @{protocol="http";bindingInformation="*:${Port}:"}
-            }
-        }
-
-        # 4. REINICIAR TODO
-        Write-Host "[*] Levantando servicios..." -ForegroundColor Cyan
-        Start-Service WAS -ErrorAction SilentlyContinue
-        Start-Service W3SVC -ErrorAction SilentlyContinue
+        # 2. Configurar el puerto de forma agresiva (Binding Universal)
+        Write-Host "[*] Aplicando enlace http://*:${Port}..." -ForegroundColor Cyan
+        Get-WebBinding -Name "$sn" | Remove-WebBinding -ErrorAction SilentlyContinue
+        New-WebBinding -Name "$sn" -Port $Port -Protocol http -IPAddress "*" | Out-Null
+        
+        # 3. Asegurar que el sitio y el servicio esten activos
+        Start-Website -Name "$sn" -ErrorAction SilentlyContinue
         iisreset /start | Out-Null
         
         New-IndexPage -Service "IIS" -Version "LTS" -Port $Port -Path "C:\inetpub\wwwroot"
         
-        # 5. FIREWALL SIN COMPROMISOS
-        $rn = "HTTP-Practice-$Port"
-        Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "HTTP-Practice-*" } | Remove-NetFirewallRule -ErrorAction SilentlyContinue
-        New-NetFirewallRule -Name $rn -DisplayName $rn -LocalPort $Port -Protocol TCP -Action Allow -Direction Inbound -Profile Any | Out-Null
+        # 4. Firewall (Regla Maestra)
+        Write-Host "[*] Abriendo paso en Firewall de Windows..." -ForegroundColor Yellow
+        Remove-NetFirewallRule -DisplayName "HTTP-Practice-*" -ErrorAction SilentlyContinue | Out-Null
+        New-NetFirewallRule -Name "HTTP-P-$Port" -DisplayName "HTTP-Practice-$Port" -LocalPort $Port -Protocol TCP -Action Allow -Direction Inbound -Profile Any -Enabled True | Out-Null
         
-        Write-Host "[OK] Configuracion completada exitosamente en puerto $Port" -ForegroundColor Green
+        # 5. Verificacion de escucha real
+        Start-Sleep -Seconds 2
+        if (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue) {
+            Write-Host "[OK] IIS ahora escucha en el puerto $Port y es accesible externamente." -ForegroundColor Green
+        } else {
+            Write-Host "[!] Windows aun no reporta escucha en $Port. Intentando Reinicio Final..." -ForegroundColor Red
+            iisreset /restart | Out-Null
+        }
     } catch {
         Write-Host "[!] Error critico: $_" -ForegroundColor Red
-        Write-Host "[*] Intentando recuperacion automatica (iisreset)..." -ForegroundColor Yellow
-        iisreset /restart | Out-Null
     }
 }
 
 function Install-ApacheWindows {
     param([string]$Version, [int]$Port)
-    Write-Host "`n[*] Instalando Apache $Version..." -ForegroundColor Blue
+    Write-Host "`n[*] Instalando Apache..." -ForegroundColor Blue
     choco install apache-httpd --version $Version -y | Out-Null
     $conf = "C:\tools\apache24\conf\httpd.conf"
-    if (Test-Path $conf) {
-        (Get-Content $conf) -replace "^Listen\s+\d+", "Listen $Port" | Set-Content $conf
-    }
+    if (Test-Path $conf) { (Get-Content $conf) -replace "^Listen\s+\d+", "Listen $Port" | Set-Content $conf }
     New-IndexPage -Service "Apache" -Version $Version -Port $Port -Path "C:\tools\apache24\htdocs"
-    Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "Apache-Practice-*" } | Remove-NetFirewallRule -ErrorAction SilentlyContinue
+    Remove-NetFirewallRule -DisplayName "Apache-Practice-*" -ErrorAction SilentlyContinue | Out-Null
     New-NetFirewallRule -DisplayName "Apache-Practice-$Port" -LocalPort $Port -Protocol TCP -Action Allow -Profile Any | Out-Null
-    Restart-Service -Name "Apache2.4" -ErrorAction SilentlyContinue
-    Write-Host "[OK] Apache funcionando." -ForegroundColor Green
+    Restart-Service Apache2.4 -ErrorAction SilentlyContinue
+    Write-Host "[OK] Apache listo." -ForegroundColor Green
 }
 
 function Install-NginxWindows {
     param([string]$Version, [int]$Port)
-    Write-Host "`n[*] Instalando Nginx $Version..." -ForegroundColor Blue
+    Write-Host "`n[*] Instalando Nginx..." -ForegroundColor Blue
     choco install nginx --version $Version -y | Out-Null
     $conf = "C:\tools\nginx\conf\nginx.conf"
-    if (Test-Path $conf) {
-        (Get-Content $conf) -replace "listen\s+\d+;", "listen $Port;" | Set-Content $conf
-    }
+    if (Test-Path $conf) { (Get-Content $conf) -replace "listen\s+\d+;", "listen $Port;" | Set-Content $conf }
     New-IndexPage -Service "Nginx" -Version $Version -Port $Port -Path "C:\tools\nginx\html"
-    Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "Nginx-Practice-*" } | Remove-NetFirewallRule -ErrorAction SilentlyContinue
+    Remove-NetFirewallRule -DisplayName "Nginx-Practice-*" -ErrorAction SilentlyContinue | Out-Null
     New-NetFirewallRule -DisplayName "Nginx-Practice-$Port" -LocalPort $Port -Protocol TCP -Action Allow -Profile Any | Out-Null
     Stop-Process -Name nginx -ErrorAction SilentlyContinue
     Start-Process -FilePath "C:\tools\nginx\nginx.exe" -WorkingDirectory "C:\tools\nginx"
-    Write-Host "[OK] Nginx funcionando." -ForegroundColor Green
+    Write-Host "[OK] Nginx listo." -ForegroundColor Green
 }
 
 function Get-ServicesStatus {
@@ -119,12 +102,12 @@ function Get-ServicesStatus {
         
         if ($isRunning) {
             $status = "Corriendo"; $color = "Green"
-            $conns = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { 
-                $proc = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue
-                $proc.Name -match $srv.Binary -or $proc.Name -match $srv.Name
-            }
-            $ports = ($conns.LocalPort | Select-Object -Unique) -join ","
-            if (-not $ports) { $ports = "Activo" }
+            # Busqueda de puerto real por red
+            $foundPorts = (Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { 
+                $p = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue
+                $p.Name -match $srv.Binary -or $p.Name -match $srv.Name
+            }).LocalPort | Select-Object -Unique
+            $ports = if ($foundPorts) { $foundPorts -join "," } else { "Activo" }
         }
         Write-Host ("{0,-15} | " -f $srv.Name) -NoNewline
         Write-Host ("{0,-12}" -f $status) -ForegroundColor $color -NoNewline
