@@ -36,9 +36,9 @@ function Install-IIS {
         $appcmd = "$env:SystemRoot\system32\inetsrv\appcmd.exe"
         
         if (-not $site) {
-            & $appcmd add site /name:"Default Web Site" /bindings:http/*:$Port: /physicalPath:"C:\inetpub\wwwroot" | Out-Null
+            & $appcmd add site /name:"Default Web Site" /bindings:http/*:${Port}: /physicalPath:"C:\inetpub\wwwroot" | Out-Null
         } else {
-            & $appcmd set site /site.name:"$siteName" /bindings:http/*:$Port: | Out-Null
+            & $appcmd set site /site.name:"$siteName" /bindings:http/*:${Port}: | Out-Null
         }
 
         # 5. Crear la pagina de inicio
