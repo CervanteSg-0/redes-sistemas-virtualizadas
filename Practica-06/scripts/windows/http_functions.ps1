@@ -477,14 +477,14 @@ function Set-IISSecurity {
         Write-Ok "Regla de firewall creada: TCP $puerto abierto para IIS (todos los perfiles)."
     }
 
-    # Forzar arranque del sitio y del pool
-    iisreset /restart | Out-Null
+    # Forzar arranque del sitio y del pool sin romper los objetos COM (NO USAR iisreset)
+    Restart-Service W3SVC -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 3
     Import-Module WebAdministration -ErrorAction SilentlyContinue
     $site = Get-Website -Name $SiteName -ErrorAction SilentlyContinue
     if ($site) {
-        if ($site.applicationPool) { Start-WebAppPool -Name $site.applicationPool }
-        Start-Website -Name $SiteName
+        if ($site.applicationPool) { Start-WebAppPool -Name $site.applicationPool -ErrorAction SilentlyContinue }
+        Start-Website -Name $SiteName -ErrorAction SilentlyContinue
     }
     Write-Ok "IIS reiniciado. Sitio activo."
 }
