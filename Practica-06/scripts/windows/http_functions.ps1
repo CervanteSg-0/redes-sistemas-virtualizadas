@@ -393,13 +393,24 @@ function Install-IIS {
     if (-not $iisVer) { $iisVer = "10.0 (WS2022)" }
     Write-Ok "IIS listo. Version: $iisVer"
 
-    if ($Puerto -ne 80) {
-        Remove-WebBinding -Name "Default Web Site" -Port 80 -Protocol http -ErrorAction SilentlyContinue
-        Write-Ok "Binding default (80) removido."
+    # Asegurar que el servicio base este corriendo antes de interactuar con los sitios
+    Start-Service W3SVC -ErrorAction SilentlyContinue
+    Set-Service   W3SVC -StartupType Automatic
+
+    # Verificar si "Default Web Site" existe o fue borrado previamente, y crearlo si no existe
+    if (-not (Get-Website -Name "Default Web Site" -ErrorAction SilentlyContinue)) {
+        if (-not (Test-Path "C:\inetpub\wwwroot")) { New-Item -ItemType Directory -Path "C:\inetpub\wwwroot" -Force | Out-Null }
+        New-Website -Name "Default Web Site" -Port $Puerto -PhysicalPath "C:\inetpub\wwwroot" -Force | Out-Null
+        Write-Ok "Sitio 'Default Web Site' creado y configurado en puerto $Puerto."
+    } else {
+        if ($Puerto -ne 80) {
+            Remove-WebBinding -Name "Default Web Site" -Port 80 -Protocol http -ErrorAction SilentlyContinue
+            Write-Ok "Binding default (80) removido."
+        }
+        Remove-WebBinding -Name "Default Web Site" -Port $Puerto -Protocol http -ErrorAction SilentlyContinue
+        New-WebBinding    -Name "Default Web Site" -Protocol http -Port $Puerto -IPAddress "*"
+        Write-Ok "Binding IIS en puerto $Puerto configurado."
     }
-    Remove-WebBinding -Name "Default Web Site" -Port $Puerto -Protocol http -ErrorAction SilentlyContinue
-    New-WebBinding    -Name "Default Web Site" -Protocol http -Port $Puerto -IPAddress "*"
-    Write-Ok "Binding IIS en puerto $Puerto configurado."
 
     Set-IISSecurity        -SiteName "Default Web Site"
     Set-WebRootPermissions -Webroot "C:\inetpub\wwwroot" -ServiceUser "IIS_IUSRS"
