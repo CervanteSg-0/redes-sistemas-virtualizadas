@@ -450,17 +450,27 @@ function Set-IISSecurity {
     }
     Write-Ok "Metodos TRACE, TRACK, DELETE bloqueados en IIS."
 
-    # --- CLAVE: ABRIR FIREWALL Y ARRANCAR SITIO PARA QUE LA CONEXION FUNCIONE ---
+    # --- ABRIR FIREWALL CORRECTAMENTE PARA IIS ---
+    # NO deshabilitar el firewall completo; crear una regla especifica de entrada
     $binding = Get-WebBinding -Name $SiteName -Protocol "http" -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($binding) {
         $puerto = [int]($binding.bindingInformation -split ':')[1]
-        # Abrir puerto en firewall (todos los perfiles)
-        Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
-        Write-Ok "Firewall desactivado para garantizar acceso al puerto $puerto."
+        # Eliminar regla vieja si existe y crear una nueva limpia
+        Remove-NetFirewallRule -DisplayName "IIS-Puerto-$puerto" -ErrorAction SilentlyContinue
+        New-NetFirewallRule `
+            -DisplayName  "IIS-Puerto-$puerto" `
+            -Direction    Inbound `
+            -Protocol     TCP `
+            -LocalPort    $puerto `
+            -Action       Allow `
+            -Profile      Any `
+            -ErrorAction  Stop | Out-Null
+        Write-Ok "Regla de firewall creada: TCP $puerto abierto para IIS (todos los perfiles)."
     }
 
     # Forzar arranque del sitio
     iisreset /restart | Out-Null
+    Start-Sleep -Seconds 3
     Write-Ok "IIS reiniciado. Sitio activo."
 }
 
@@ -511,11 +521,15 @@ function Install-ApacheWindows {
     $confFile = "$apacheDir\conf\httpd.conf"
     $webroot  = "$apacheDir\htdocs"
 
-    (Get-Content $confFile) `
-        -replace '^Listen \d+',    "Listen $Puerto" `
-        -replace '^ServerName .*', "ServerName localhost:$Puerto" |
-        Set-Content $confFile
-    Write-Ok "Puerto $Puerto aplicado en httpd.conf."
+    # Reemplazar Listen: forzar escucha en TODAS las interfaces (0.0.0.0)
+    # Esto es clave para poder conectarse desde fuera de la VM
+    $confContent = Get-Content $confFile
+    $confContent = $confContent -replace '^Listen\s+.*', "Listen 0.0.0.0:$Puerto"
+    $confContent = $confContent -replace '^ServerName\s+.*', "ServerName localhost:$Puerto"
+    # Eliminar cualquier linea que fuerce solo 127.0.0.1
+    $confContent = $confContent -replace '^Listen\s+127\.0\.0\.1:\d+', "Listen 0.0.0.0:$Puerto"
+    $confContent | Set-Content $confFile
+    Write-Ok "Puerto $Puerto aplicado en httpd.conf (escuchando en 0.0.0.0:$Puerto - accesible desde fuera de la VM)."
 
     Set-ApacheSecurity     -ConfFile $confFile
     Set-WebRootPermissions -Webroot $webroot -ServiceUser "NETWORK SERVICE"

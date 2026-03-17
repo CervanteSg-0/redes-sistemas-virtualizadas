@@ -13,7 +13,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:APACHE_CONF    = "$env:APPDATA\Apache24\conf\httpd.conf"
 $script:APACHE_HTDOCS  = "$env:APPDATA\Apache24\htdocs"
 $script:APACHE_BIN     = "$env:APPDATA\Apache24\bin\httpd.exe"
-$script:APACHE_SVC     = "Apache2.4"
+$script:APACHE_SVC     = "Apache24"
 $script:NGINX_CONF     = "C:\nginx\conf\nginx.conf"
 $script:NGINX_HTML     = "C:\nginx\html"
 $script:NGINX_SVC      = "Nginx"
@@ -73,8 +73,10 @@ function Get-ServicePort {
         }
         { $_ -eq $script:APACHE_SVC } {
             if (Test-Path $script:APACHE_CONF) {
-                $linea = Get-Content $script:APACHE_CONF | Where-Object { $_ -match '^Listen \d+' } | Select-Object -First 1
-                if ($linea) { return ($linea -split ' ')[1] }
+                # Buscar cualquier Listen, extrayendo los ultimos digitos despues de : o espacio
+                $linea = Get-Content $script:APACHE_CONF | Where-Object { $_ -match '^Listen\s+.*' } | Select-Object -First 1
+                if ($linea -match ':(\d+)$') { return $matches[1] }
+                elseif ($linea -match 'Listen\s+(\d+)$') { return $matches[1] }
             }
             return "?"
         }
@@ -358,7 +360,7 @@ function Show-ChangePortMenu {
         "2" {
             $p = Get-PortFromUser -Servicio "Apache" -Default 8080
             if (Test-Path $script:APACHE_CONF) {
-                (Get-Content $script:APACHE_CONF) -replace '^Listen \d+', "Listen $p" |
+                (Get-Content $script:APACHE_CONF) -replace '^Listen\s+.*', "Listen 0.0.0.0:$p" |
                     Set-Content $script:APACHE_CONF
                 # Actualizar index.html
                 Set-Content "$script:APACHE_HTDOCS\index.html" "<html><head><meta charset='UTF-8'><title>Apache - Practica 6</title><style>body{font-family:Segoe UI;background:#1a1a2e;color:#eee;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:#16213e;border-radius:12px;padding:40px 60px;text-align:center}h1{color:#4fc3f7}.badge{background:#e94560;color:#fff;border-radius:6px;padding:4px 14px;margin:4px;display:inline-block}</style></head><body><div class='card'><h1>Apache</h1><span class='badge'>Servidor: Apache</span><span class='badge'>Version: 2.4.55</span><span class='badge'>Puerto: $p</span></div></body></html>"
