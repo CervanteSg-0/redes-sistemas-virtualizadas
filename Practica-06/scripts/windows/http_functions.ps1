@@ -482,6 +482,8 @@ function Set-IISSecurity {
     # Forzar arranque del sitio
     iisreset /restart | Out-Null
     Start-Sleep -Seconds 3
+    Import-Module WebAdministration -ErrorAction SilentlyContinue
+    Start-Website -Name $SiteName -ErrorAction SilentlyContinue
     Write-Ok "IIS reiniciado. Sitio activo."
 }
 
