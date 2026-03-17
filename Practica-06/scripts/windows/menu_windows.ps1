@@ -20,6 +20,122 @@ $script:NGINX_SVC      = "Nginx"
 $script:IIS_WEBROOT    = "C:\inetpub\wwwroot"
 
 # ------------------------------------------------------------------------------
+# HELPERS IIS / NGINX
+# ------------------------------------------------------------------------------
+
+function Restart-IISStack {
+    param([string]$SiteName = "Default Web Site")
+
+    Import-Module WebAdministration -ErrorAction SilentlyContinue
+
+    try { Start-Service HTTP  -ErrorAction SilentlyContinue } catch {}
+    try { Start-Service WAS   -ErrorAction SilentlyContinue } catch {}
+    try { Start-Service W3SVC -ErrorAction SilentlyContinue } catch {}
+
+    try {
+        if (Test-Path "IIS:\AppPools\DefaultAppPool") {
+            Start-WebAppPool -Name "DefaultAppPool" -ErrorAction SilentlyContinue
+        }
+    } catch {}
+
+    try { Stop-Website  -Name $SiteName -ErrorAction SilentlyContinue } catch {}
+    Start-Sleep -Seconds 1
+    try { Start-Website -Name $SiteName -ErrorAction SilentlyContinue } catch {}
+
+    try {
+        & "$env:SystemRoot\System32\iisreset.exe" /restart | Out-Null
+    } catch {}
+
+    Start-Sleep -Seconds 2
+}
+
+function Set-IISPort {
+    param(
+        [int]$Puerto,
+        [string]$SiteName = "Default Web Site"
+    )
+
+    Import-Module WebAdministration -ErrorAction Stop
+
+    if (-not (Test-Path "IIS:\Sites\$SiteName")) {
+        New-Website -Name $SiteName -PhysicalPath $script:IIS_WEBROOT -Port $Puerto -IPAddress "*" -Force | Out-Null
+    } else {
+        Get-WebBinding -Name $SiteName -Protocol "http" -ErrorAction SilentlyContinue |
+            Remove-WebBinding -ErrorAction SilentlyContinue
+        New-WebBinding -Name $SiteName -Protocol "http" -IPAddress "*" -Port $Puerto | Out-Null
+    }
+
+    Restart-IISStack -SiteName $SiteName
+
+    $escucha = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+        Where-Object { $_.LocalPort -eq $Puerto }
+
+    if (-not $escucha) {
+        Write-Warn "IIS aun no aparece escuchando en $Puerto. Se intentara un segundo arranque limpio."
+        try { Stop-Service W3SVC -Force -ErrorAction SilentlyContinue } catch {}
+        try { Stop-Service WAS   -Force -ErrorAction SilentlyContinue } catch {}
+        Start-Sleep -Seconds 2
+        Restart-IISStack -SiteName $SiteName
+        $escucha = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+            Where-Object { $_.LocalPort -eq $Puerto }
+    }
+
+    if ($escucha) {
+        Write-Ok "IIS escuchando en puerto $Puerto."
+        return $true
+    }
+
+    Write-Warn "No se detecto listener activo en el puerto $Puerto. Revisa HTTP.sys / Event Viewer si continua el fallo."
+    return $false
+}
+
+function Restart-NginxManaged {
+    param([string]$NginxDir = "C:\nginx")
+
+    $nginxExe = Join-Path $NginxDir 'nginx.exe'
+    if (-not (Test-Path $nginxExe)) {
+        Write-Err "No se encontro nginx.exe en $nginxExe"
+        return $false
+    }
+
+    Push-Location $NginxDir
+    try {
+        & $nginxExe -t -p $NginxDir -c conf\nginx.conf 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err "La validacion de nginx.conf fallo. No se aplico el reinicio."
+            return $false
+        }
+
+        Get-Process nginx -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 1
+
+        if (Get-Command nssm -ErrorAction SilentlyContinue) {
+            nssm stop $script:NGINX_SVC 2>$null | Out-Null
+            nssm start $script:NGINX_SVC 2>$null | Out-Null
+        } elseif (Get-Service -Name $script:NGINX_SVC -ErrorAction SilentlyContinue) {
+            Restart-Service -Name $script:NGINX_SVC -Force -ErrorAction SilentlyContinue
+        } else {
+            Start-Process -FilePath $nginxExe -ArgumentList @('-p', $NginxDir, '-c', 'conf\nginx.conf') -WorkingDirectory $NginxDir -WindowStyle Hidden
+        }
+
+        Start-Sleep -Seconds 2
+        $p = Get-ServicePort -Servicio $script:NGINX_SVC
+        if ($p -match '^\d+$') {
+            $escucha = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+                Where-Object { $_.LocalPort -eq [int]$p }
+            if ($escucha) {
+                Write-Ok "Nginx escuchando en puerto $p."
+                return $true
+            }
+        }
+        Write-Warn "Nginx no aparece escuchando aun despues del reinicio."
+        return $false
+    } finally {
+        Pop-Location
+    }
+}
+
+# ------------------------------------------------------------------------------
 # CABECERA Y ESTADO DE SERVICIOS
 # ------------------------------------------------------------------------------
 
@@ -374,34 +490,25 @@ function Show-ChangePortMenu {
     Write-Host "  ============  CAMBIAR PUERTO  ============" -ForegroundColor White
     Write-Host ""
     Write-Host "   Puerto actual de cada servicio:" -ForegroundColor Gray
-    Write-Host "   IIS    : $(Get-ServicePort -Servicio 'W3SVC')"                  -ForegroundColor Gray
-    Write-Host "   Apache : $(Get-ServicePort -Servicio $script:APACHE_SVC)"       -ForegroundColor Gray
-    Write-Host "   Nginx  : $(Get-ServicePort -Servicio $script:NGINX_SVC)"        -ForegroundColor Gray
+    Write-Host "   IIS    : $(Get-ServicePort -Servicio 'W3SVC')"            -ForegroundColor Gray
+    Write-Host "   Apache : $(Get-ServicePort -Servicio $script:APACHE_SVC)" -ForegroundColor Gray
+    Write-Host "   Nginx  : $(Get-ServicePort -Servicio $script:NGINX_SVC)"  -ForegroundColor Gray
     Write-Host ""
-    Write-Host "   1)  IIS"      -ForegroundColor Green
-    Write-Host "   2)  Apache"   -ForegroundColor Green
-    Write-Host "   3)  Nginx"    -ForegroundColor Green
-    Write-Host "   0)  Volver"   -ForegroundColor Red
+    Write-Host "   1)  IIS"    -ForegroundColor Green
+    Write-Host "   2)  Apache" -ForegroundColor Green
+    Write-Host "   3)  Nginx"  -ForegroundColor Green
+    Write-Host "   0)  Volver" -ForegroundColor Red
     Write-Host ""
 
     $sel = Read-Host "  Servicio [0-3]"
     switch ($sel) {
         "1" {
             $p = Get-PortFromUser -Servicio "IIS" -Default 80
-            Import-Module WebAdministration -ErrorAction SilentlyContinue
-            Get-WebBinding -Name "Default Web Site" -Protocol "http" -ErrorAction SilentlyContinue |
-                Remove-WebBinding -ErrorAction SilentlyContinue
-            New-WebBinding -Name "Default Web Site" -Protocol "http" -IPAddress "*" -Port $p -HostHeader "" | Out-Null
-
+            $ok = Set-IISPort -Puerto $p -SiteName "Default Web Site"
             New-IndexPage -Servicio "IIS" -Version "10.0" -Puerto $p -Webroot $script:IIS_WEBROOT
             Set-FirewallRule -Puerto $p -Servicio "IIS"
             Set-IISSecurity -SiteName "Default Web Site"
-
-            Start-Service WAS -ErrorAction SilentlyContinue
-            Restart-Service W3SVC -Force -ErrorAction SilentlyContinue
-            Start-Sleep -Seconds 2
-
-            Write-Ok "Puerto IIS cambiado a $p."
+            if ($ok) { Write-Ok "Puerto IIS cambiado a $p." } else { Write-Warn "El binding se actualizo, pero no se detecto listener activo." }
             curl.exe -I "http://127.0.0.1:$p"
         }
         "2" {
@@ -410,27 +517,24 @@ function Show-ChangePortMenu {
                 $c = Get-Content $script:APACHE_CONF | Where-Object { $_ -notmatch '^\s*Listen\s' -and $_ -notmatch '^\s*ServerName\s' }
                 $c = @("Listen 0.0.0.0:$p", "ServerName localhost:$p") + $c
                 $c | Set-Content $script:APACHE_CONF
-                # Actualizar index.html
-                Set-Content "$script:APACHE_HTDOCS\index.html" "<html><head><meta charset='UTF-8'><title>Apache - Practica 6</title><style>body{font-family:Segoe UI;background:#1a1a2e;color:#eee;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:#16213e;border-radius:12px;padding:40px 60px;text-align:center}h1{color:#4fc3f7}.badge{background:#e94560;color:#fff;border-radius:6px;padding:4px 14px;margin:4px;display:inline-block}</style></head><body><div class='card'><h1>Apache</h1><span class='badge'>Servidor: Apache</span><span class='badge'>Version: 2.4.55</span><span class='badge'>Puerto: $p</span></div></body></html>"
+                New-IndexPage -Servicio "Apache" -Version "2.4.x" -Puerto $p -Webroot $script:APACHE_HTDOCS
                 Set-FirewallRule -Puerto $p -Servicio "Apache"
                 Restart-Service $script:APACHE_SVC -ErrorAction SilentlyContinue
                 Start-Sleep -Seconds 2
                 Write-Ok "Puerto Apache cambiado a $p."
                 curl.exe -I "http://localhost:$p"
-            } else { Write-Err "httpd.conf no encontrado en $script:APACHE_CONF" }
+            } else {
+                Write-Err "httpd.conf no encontrado en $script:APACHE_CONF"
+            }
         }
         "3" {
             $p = Get-PortFromUser -Servicio "Nginx" -Default 8081
             Set-NginxConfig -Puerto $p
             New-IndexPage -Servicio "Nginx" -Version "1.26.3" -Puerto $p -Webroot $script:NGINX_HTML
             Set-FirewallRule -Puerto $p -Servicio "Nginx"
-
-            if (Restart-NginxManaged -NginxDir "C:\nginx") {
-                Write-Ok "Puerto Nginx cambiado a $p."
-                curl.exe -I "http://127.0.0.1:$p"
-            } else {
-                Write-Err "No se pudo reiniciar Nginx con la nueva configuracion."
-            }
+            $ok = Restart-NginxManaged -NginxDir "C:\nginx"
+            if ($ok) { Write-Ok "Puerto Nginx cambiado a $p." } else { Write-Warn "Nginx no confirmo el nuevo puerto. Revisa logs en C:\nginx\logs." }
+            curl.exe -I "http://localhost:$p"
         }
         "0" { return }
         default { Write-Warn "Opcion invalida." }
