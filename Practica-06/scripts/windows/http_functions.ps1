@@ -372,6 +372,7 @@ function Get-InstalledVersion {
 # IIS - Instalacion forzosa (sin gestor de paquetes)
 # ------------------------------------------------------------------------------
 
+
 function Install-IIS {
     param([int]$Puerto)
 
@@ -380,7 +381,8 @@ function Install-IIS {
     $features = @(
         "Web-Server", "Web-Common-Http", "Web-Static-Content",
         "Web-Http-Logging", "Web-Security", "Web-Filtering",
-        "Web-Mgmt-Tools", "Web-Mgmt-Console", "Web-Http-Errors"
+        "Web-Mgmt-Tools", "Web-Mgmt-Console", "Web-Http-Errors",
+        "Web-Request-Monitor", "Web-Http-Redirect"
     )
     foreach ($feat in $features) {
         $r = Install-WindowsFeature -Name $feat -IncludeManagementTools -ErrorAction SilentlyContinue
@@ -393,33 +395,32 @@ function Install-IIS {
     if (-not $iisVer) { $iisVer = "10.0 (WS2022)" }
     Write-Ok "IIS listo. Version: $iisVer"
 
-    # --- RE-CREACION FORZOSA DEL SITIO (NIVEL APPCMD) ---
-    $appcmd = "$env:SystemRoot\system32\inetsrv\appcmd.exe"
-    
-    Write-Info "Eliminando sitio actual para limpieza total..."
-    & $appcmd delete site "Default Web Site" 2>$null | Out-Null
-    
-    # Limpiar cualquier reserva de URL que choque con el puerto
-    Write-Info "Limpiando reservaciones de puerto $Puerto en el Kernel..."
-    netsh http delete urlacl url=http://*:$Puerto/ 2>$null | Out-Null
-    netsh http delete urlacl url=http://+:$Puerto/ 2>$null | Out-Null
-    
-    if (-not (Test-Path "C:\inetpub\wwwroot")) { 
-        New-Item -ItemType Directory -Path "C:\inetpub\wwwroot" -Force | Out-Null 
+    if (-not (Test-Path "C:\inetpub\wwwroot")) {
+        New-Item -ItemType Directory -Path "C:\inetpub\wwwroot" -Force | Out-Null
     }
-    
-    # Crear sitio usando binding explicito 0.0.0.0 (estilo Apache)
-    Write-Info "Creando sitio con binding forzado en 0.0.0.0:$Puerto..."
-    & $appcmd add site /name:"Default Web Site" /id:1 /bindings:http/0.0.0.0:$($Puerto): /physicalPath:"C:\inetpub\wwwroot" 2>$null | Out-Null
-    Write-Ok "Sitio 'Default Web Site' recreado (appcmd) en puerto $Puerto."
+
+    Write-Info "Reconfigurando binding HTTP de IIS en puerto $Puerto..."
+    Get-WebBinding -Name "Default Web Site" -Protocol "http" -ErrorAction SilentlyContinue |
+        Remove-WebBinding -ErrorAction SilentlyContinue
+
+    New-WebBinding -Name "Default Web Site" -Protocol "http" -IPAddress "*" -Port $Puerto -HostHeader "" | Out-Null
+
+    Set-ItemProperty "IIS:\Sites\Default Web Site" -Name physicalPath -Value "C:\inetpub\wwwroot" -ErrorAction SilentlyContinue
 
     Set-IISSecurity        -SiteName "Default Web Site"
     Set-WebRootPermissions -Webroot "C:\inetpub\wwwroot" -ServiceUser "IIS_IUSRS"
     New-IndexPage          -Servicio "IIS" -Version $iisVer -Puerto $Puerto -Webroot "C:\inetpub\wwwroot"
     Set-FirewallRule       -Puerto $Puerto -PuertoAnterior 80 -Servicio "IIS"
 
+    Set-Service WAS   -StartupType Automatic -ErrorAction SilentlyContinue
+    Set-Service W3SVC -StartupType Automatic -ErrorAction SilentlyContinue
+    Start-Service WAS   -ErrorAction SilentlyContinue
     Start-Service W3SVC -ErrorAction SilentlyContinue
-    Set-Service   W3SVC -StartupType Automatic
+
+    $appcmd = "$env:SystemRoot\system32\inetsrv\appcmd.exe"
+    & $appcmd start apppool /apppool.name:"DefaultAppPool" 2>$null | Out-Null
+    & $appcmd start site "Default Web Site" 2>$null | Out-Null
+
     Write-Ok "Servicio W3SVC activo."
 
     Write-Section "IIS listo"
@@ -427,78 +428,44 @@ function Install-IIS {
     Write-Host "  Webroot : C:\inetpub\wwwroot"       -ForegroundColor Green
 }
 
+
+
 function Set-IISSecurity {
     param([string]$SiteName = "Default Web Site")
 
     Write-Info "Aplicando seguridad en IIS..."
 
+    Import-Module WebAdministration -ErrorAction SilentlyContinue
     $ac = "$env:SystemRoot\system32\inetsrv\appcmd.exe"
 
-    # Ocultar X-Powered-By y Server
-    & $ac set config /section:httpProtocol /-"customHeaders.[name='X-Powered-By']"        /commit:apphost 2>$null | Out-Null
+    & $ac set config /section:httpProtocol /-"customHeaders.[name='X-Powered-By']" /commit:apphost 2>$null | Out-Null
+
     try {
         Set-WebConfigurationProperty -PSPath "IIS:\" -Filter "system.webServer/security/requestFiltering" -Name "removeServerHeader" -Value $true
         Write-Ok "Header Server ocultado (removeServerHeader = true)."
-    } catch { Write-Warn "removeServerHeader: $_" }
+    } catch {
+        Write-Warn "removeServerHeader: $_"
+    }
 
-    # Headers de seguridad: BORRAR primero para evitar duplicados, luego agregar
     $headers = [ordered]@{
         "X-Frame-Options"        = "SAMEORIGIN"
         "X-Content-Type-Options" = "nosniff"
         "X-XSS-Protection"       = "1; mode=block"
     }
+
     foreach ($h in $headers.GetEnumerator()) {
-        # Borrar en todos los niveles posibles
         & $ac set config /section:httpProtocol /-"customHeaders.[name='$($h.Key)']" /commit:apphost 2>$null | Out-Null
-        & $ac set config "site '$SiteName'" /section:httpProtocol /-"customHeaders.[name='$($h.Key)']" /commit:webroot 2>$null | Out-Null
-        # Agregar limpio
         & $ac set config /section:httpProtocol /+"customHeaders.[name='$($h.Key)',value='$($h.Value)']" /commit:apphost 2>$null | Out-Null
         Write-Ok "$($h.Key): $($h.Value)"
     }
 
-    # Bloquear verbos peligrosos
     foreach ($m in @("TRACE", "TRACK", "DELETE")) {
+        & $ac set config /section:requestFiltering /-"verbs.[verb='$m']" /commit:apphost 2>$null | Out-Null
         & $ac set config /section:requestFiltering /+"verbs.[verb='$m',allowed='false']" /commit:apphost 2>$null | Out-Null
     }
     Write-Ok "Metodos TRACE, TRACK, DELETE bloqueados en IIS."
-
-    # --- ABRIR FIREWALL CORRECTAMENTE PARA IIS ---
-    # NO deshabilitar el firewall completo; crear una regla especifica de entrada
-    $binding = Get-WebBinding -Name $SiteName -Protocol "http" -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($binding) {
-        $puerto = [int]($binding.bindingInformation -split ':')[1]
-        # Eliminar regla vieja si existe y crear una nueva limpia
-        Remove-NetFirewallRule -DisplayName "IIS-Puerto-$puerto" -ErrorAction SilentlyContinue
-        New-NetFirewallRule `
-            -DisplayName  "IIS-Puerto-$puerto" `
-            -Direction    Inbound `
-            -Protocol     TCP `
-            -LocalPort    $puerto `
-            -Action       Allow `
-            -Profile      Any `
-            -ErrorAction  Stop | Out-Null
-    # --- REESTABLECIMIENTO TOTAL DE RED (FUERZA BRUTA) ---
-    Write-Info "Reseteando enchufe de red IIS (HTTP.SYS)..."
-    # Forzar que el kernel escuche en todas las interfaces
-    netsh http delete iplisten ipaddress=0.0.0.0 2>$null | Out-Null
-    netsh http add iplisten ipaddress=0.0.0.0 2>$null | Out-Null
-    
-    # Matar procesos si estan bloqueando el reinicio
-    Stop-Service W3SVC -Force -ErrorAction SilentlyContinue
-    Stop-Service WAS -Force -ErrorAction SilentlyContinue
-    Get-Process w3wp -ErrorAction SilentlyContinue | Stop-Process -Force
-    Start-Sleep -Seconds 2
-    
-    Start-Service WAS -ErrorAction SilentlyContinue
-    Start-Service W3SVC -ErrorAction SilentlyContinue
-    
-    # Forzar inicio de AppPool y Website via AppCmd
-    $appcmd = "$env:SystemRoot\system32\inetsrv\appcmd.exe"
-    & $appcmd start apppool /apppool.name:"DefaultAppPool" 2>$null | Out-Null
-    & $appcmd start site "Default Web Site" 2>$null | Out-Null
-    
-    Write-Ok "IIS reiniciado y enchufe de red forzado."
 }
+
 
 # ------------------------------------------------------------------------------
 # APACHE WINDOWS
@@ -691,6 +658,37 @@ http {
     Write-Host "  Webroot : $webroot"                 -ForegroundColor Green
 }
 
+
+function Restart-NginxManaged {
+    param([string]$NginxDir = "C:\nginx")
+
+    $nginxExe = Join-Path $NginxDir "nginx.exe"
+    if (-not (Test-Path $nginxExe)) {
+        Write-Err "No se encontro nginx.exe en $nginxExe"
+        return $false
+    }
+
+    & $nginxExe -t -p $NginxDir -c conf\nginx.conf 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "nginx.conf invalido. No se aplico el cambio de puerto."
+        return $false
+    }
+
+    try { Stop-Service "Nginx" -Force -ErrorAction SilentlyContinue } catch {}
+    Get-Process nginx -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+
+    if (Get-Service -Name "Nginx" -ErrorAction SilentlyContinue) {
+        Start-Service "Nginx" -ErrorAction SilentlyContinue
+    } else {
+        Start-Process $nginxExe -ArgumentList @("-p", $NginxDir, "-c", "conf\nginx.conf") -WorkingDirectory $NginxDir -WindowStyle Hidden
+    }
+
+    Start-Sleep -Seconds 2
+    return $true
+}
+
+
 function Register-NginxService {
     param([string]$NginxDir)
 
@@ -701,17 +699,32 @@ function Register-NginxService {
     }
 
     $nginxExe = "$NginxDir\nginx.exe"
+    if (-not (Test-Path $nginxExe)) {
+        Write-Err "No se encontro nginx.exe en $nginxExe"
+        return
+    }
+
+    & $nginxExe -t -p $NginxDir -c conf\nginx.conf 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "La validacion de nginx.conf fallo. No se registrara el servicio."
+        return
+    }
+
+    Get-Process nginx -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Stop-Service "Nginx" -Force -ErrorAction SilentlyContinue
+
     if (Get-Command nssm -ErrorAction SilentlyContinue) {
-        nssm stop    "Nginx" 2>$null | Out-Null
-        nssm remove  "Nginx" confirm 2>$null | Out-Null
+        nssm remove "Nginx" confirm 2>$null | Out-Null
         nssm install "Nginx" $nginxExe 2>&1 | Out-Null
-        nssm set     "Nginx" AppDirectory $NginxDir 2>&1 | Out-Null
-        nssm set     "Nginx" Start SERVICE_AUTO_START 2>&1 | Out-Null
+        nssm set "Nginx" AppDirectory $NginxDir 2>&1 | Out-Null
+        nssm set "Nginx" AppParameters ('-p "' + $NginxDir + '" -c conf\nginx.conf') 2>&1 | Out-Null
+        nssm set "Nginx" Start SERVICE_AUTO_START 2>&1 | Out-Null
         Start-Service "Nginx" -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
         Write-Ok "Nginx registrado como servicio Windows (NSSM) e iniciado."
     } else {
         Write-Warn "NSSM no disponible. Iniciando Nginx directamente..."
-        Start-Process $nginxExe -WorkingDirectory $NginxDir -WindowStyle Hidden
+        Start-Process $nginxExe -ArgumentList @("-p", $NginxDir, "-c", "conf\nginx.conf") -WorkingDirectory $NginxDir -WindowStyle Hidden
         Write-Ok "Nginx iniciado en segundo plano."
     }
 }

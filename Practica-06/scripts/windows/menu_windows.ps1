@@ -388,12 +388,19 @@ function Show-ChangePortMenu {
     switch ($sel) {
         "1" {
             $p = Get-PortFromUser -Servicio "IIS" -Default 80
-            Get-WebBinding -Name "Default Web Site" -Protocol http -ErrorAction SilentlyContinue | Remove-WebBinding -ErrorAction SilentlyContinue
-            New-WebBinding -Name "Default Web Site" -Protocol http -Port $p
-            # Actualizar index.html
-            Set-Content "$script:IIS_WEBROOT\index.html" "<html><head><meta charset='UTF-8'><title>IIS - Practica 6</title><style>body{font-family:Segoe UI;background:#1a1a2e;color:#eee;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:#16213e;border-radius:12px;padding:40px 60px;text-align:center}h1{color:#4fc3f7}.badge{background:#e94560;color:#fff;border-radius:6px;padding:4px 14px;margin:4px;display:inline-block}</style></head><body><div class='card'><h1>IIS</h1><span class='badge'>Servidor: IIS</span><span class='badge'>Version: 10.0</span><span class='badge'>Puerto: $p</span></div></body></html>"
+            Import-Module WebAdministration -ErrorAction SilentlyContinue
+            Get-WebBinding -Name "Default Web Site" -Protocol "http" -ErrorAction SilentlyContinue |
+                Remove-WebBinding -ErrorAction SilentlyContinue
+            New-WebBinding -Name "Default Web Site" -Protocol "http" -IPAddress "*" -Port $p -HostHeader "" | Out-Null
+
+            New-IndexPage -Servicio "IIS" -Version "10.0" -Puerto $p -Webroot $script:IIS_WEBROOT
             Set-FirewallRule -Puerto $p -Servicio "IIS"
             Set-IISSecurity -SiteName "Default Web Site"
+
+            Start-Service WAS -ErrorAction SilentlyContinue
+            Restart-Service W3SVC -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
+
             Write-Ok "Puerto IIS cambiado a $p."
             curl.exe -I "http://127.0.0.1:$p"
         }
@@ -415,13 +422,15 @@ function Show-ChangePortMenu {
         "3" {
             $p = Get-PortFromUser -Servicio "Nginx" -Default 8081
             Set-NginxConfig -Puerto $p
-            # Actualizar index.html
-            Set-Content "$script:NGINX_HTML\index.html" "<html><head><meta charset='UTF-8'><title>Nginx - Practica 6</title><style>body{font-family:Segoe UI;background:#1a1a2e;color:#eee;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:#16213e;border-radius:12px;padding:40px 60px;text-align:center}h1{color:#4fc3f7}.badge{background:#e94560;color:#fff;border-radius:6px;padding:4px 14px;margin:4px;display:inline-block}</style></head><body><div class='card'><h1>Nginx</h1><span class='badge'>Servidor: Nginx</span><span class='badge'>Version: 1.26.3</span><span class='badge'>Puerto: $p</span></div></body></html>"
+            New-IndexPage -Servicio "Nginx" -Version "1.26.3" -Puerto $p -Webroot $script:NGINX_HTML
             Set-FirewallRule -Puerto $p -Servicio "Nginx"
-            nssm restart $script:NGINX_SVC 2>$null | Out-Null
-            Start-Sleep -Seconds 2
-            Write-Ok "Puerto Nginx cambiado a $p."
-            curl.exe -I "http://localhost:$p"
+
+            if (Restart-NginxManaged -NginxDir "C:\nginx") {
+                Write-Ok "Puerto Nginx cambiado a $p."
+                curl.exe -I "http://127.0.0.1:$p"
+            } else {
+                Write-Err "No se pudo reiniciar Nginx con la nueva configuracion."
+            }
         }
         "0" { return }
         default { Write-Warn "Opcion invalida." }
