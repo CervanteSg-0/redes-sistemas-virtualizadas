@@ -397,18 +397,19 @@ function Install-IIS {
     Start-Service W3SVC -ErrorAction SilentlyContinue
     Set-Service   W3SVC -StartupType Automatic
 
-    # Verificar si "Default Web Site" existe o fue borrado previamente, y crearlo si no existe
-    if (-not (Get-Website -Name "Default Web Site" -ErrorAction SilentlyContinue)) {
-        if (-not (Test-Path "C:\inetpub\wwwroot")) { New-Item -ItemType Directory -Path "C:\inetpub\wwwroot" -Force | Out-Null }
-        New-Website -Name "Default Web Site" -Port $Puerto -PhysicalPath "C:\inetpub\wwwroot" -Force | Out-Null
-        Write-Ok "Sitio 'Default Web Site' creado y configurado en puerto $Puerto."
-    } else {
-        # Limpiar ABSOLUTAMENTE TODOS los bindings http viejos antes de poner el nuevo
-        Get-WebBinding -Name "Default Web Site" -Protocol http -ErrorAction SilentlyContinue | Remove-WebBinding -ErrorAction SilentlyContinue
-        # Crear binding en el formato correcto *:PUERTO:
-        New-WebBinding -Name "Default Web Site" -Protocol http -Port $Puerto
-        Write-Ok "Binding IIS en puerto $Puerto configurado."
+    # --- RE-CREACION FORZOSA DEL SITIO PARA ASEGURAR BINDING ---
+    if (Get-Website -Name "Default Web Site" -ErrorAction SilentlyContinue) {
+        Remove-Website -Name "Default Web Site" -ErrorAction SilentlyContinue
+        Write-Info "Sitio anterior removido para limpieza de bindings."
     }
+    
+    if (-not (Test-Path "C:\inetpub\wwwroot")) { 
+        New-Item -ItemType Directory -Path "C:\inetpub\wwwroot" -Force | Out-Null 
+    }
+    
+    # Crear el sitio con el puerto objetivo de una vez
+    New-Website -Name "Default Web Site" -Port $Puerto -PhysicalPath "C:\inetpub\wwwroot" -Force | Out-Null
+    Write-Ok "Sitio 'Default Web Site' recreado en puerto $Puerto."
 
     Set-IISSecurity        -SiteName "Default Web Site"
     Set-WebRootPermissions -Webroot "C:\inetpub\wwwroot" -ServiceUser "IIS_IUSRS"
@@ -477,28 +478,31 @@ function Set-IISSecurity {
         Write-Ok "Regla de firewall creada: TCP $puerto abierto para IIS (todos los perfiles)."
     }
 
-    # --- FUERZA BRUTA PARA EL ESCUCHA (LISTENER) ---
-    Write-Info "Limpiando restricciones de red en HTTP.SYS (Kernel)..."
-    # Quitar cualquier IP restringida que impida abrir el puerto
+    # --- REESTABLECIMIENTO TOTAL DE RED (FUERZA BRUTA) ---
+    Write-Info "Reseteando enchufe de red IIS (HTTP.SYS)..."
+    # Eliminar cualquier lista restringida de IPs que impida escuchar en el puerto nuevo
     netsh http delete iplisten ipaddress=0.0.0.0 2>$null | Out-Null
-    netsh http add iplisten ipaddress=0.0.0.0 2>$null | Out-Null
+    netsh http delete iplisten ipaddress=127.0.0.1 2>$null | Out-Null
     
-    # Detener servicios en cascada para una limpieza profunda
+    # Detener y arrancar servicios en orden de dependencia
     Stop-Service W3SVC -Force -ErrorAction SilentlyContinue
-    Stop-Service WAS -Force -ErrorAction SilentlyContinue 
+    Stop-Service WAS -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 2
     
-    # Iniciar servicios de nuevo
     Start-Service WAS -ErrorAction SilentlyContinue
     Start-Service W3SVC -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 3
+    
     Import-Module WebAdministration -ErrorAction SilentlyContinue
     $site = Get-Website -Name $SiteName -ErrorAction SilentlyContinue
     if ($site) {
-        if ($site.applicationPool) { Start-WebAppPool -Name $site.applicationPool -ErrorAction SilentlyContinue }
+        # Forzar inicio de pool y sitio sin estados fantasmas
+        $pool = $site.applicationPool
+        if ($pool) {
+            & "$env:SystemRoot\system32\inetsrv\appcmd.exe" start apppool /apppool.name:"$pool" 2>$null | Out-Null
+        }
         Start-Website -Name $SiteName -ErrorAction SilentlyContinue
     }
-    Write-Ok "IIS reiniciado. Sitio activo."
+    Write-Ok "IIS reiniciado y enchufe de red forzado."
 }
 
 # ------------------------------------------------------------------------------

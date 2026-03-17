@@ -156,33 +156,29 @@ function Install-NginxManual {
     $destDir = "C:\nginx"
 
     if (-not (Test-Path "$destDir\nginx.exe")) {
-        Write-Info "Intentando descargar Nginx 1.26.3..."
-        try {
-            # Intentar descarga desde el sitio oficial
-            Invoke-WebRequest -Uri $url -OutFile $destZip -ErrorAction Stop
-        } catch {
-            Write-Warn "Fallo descarga oficial. Intentando mirror secundario..."
-            try {
-                # Fallback: Mirror (ejemplo de GitHub o similar si estuviera disponible, o simplemente reportar)
-                Invoke-WebRequest -Uri "https://nginx.org/download/nginx-1.26.3.zip" -OutFile $destZip -ErrorAction Stop
-            } catch {
-                Write-Err "No hay conexion a internet para descargar Nginx."
-                Write-Host "Por favor, descarga 'nginx-1.26.3.zip' manualmente y ponlo en '$destZip'." -ForegroundColor Yellow
-                return
-            }
-        }
-        
+        Write-Info "Intentando localizar o descargar Nginx 1.26.3..."
         if (Test-Path $destZip) {
-            Write-Ok "Archivo descargado. Extrayendo..."
+            Write-Ok "Zip detectado localmente en $destZip. Extrayendo..."
             if (-not (Test-Path "C:\")) { New-Item -ItemType Directory -Path "C:\" -Force | Out-Null }
             Expand-Archive -Path $destZip -DestinationPath "C:\" -Force
             if (Test-Path "C:\nginx-1.26.3") {
                 if (Test-Path $destDir) { Remove-Item $destDir -Recurse -Force -ErrorAction SilentlyContinue }
                 Rename-Item "C:\nginx-1.26.3" $destDir -ErrorAction SilentlyContinue
             }
+        } else {
+            try {
+                Invoke-WebRequest -Uri $url -OutFile $destZip -ErrorAction Stop
+                Expand-Archive -Path $destZip -DestinationPath "C:\" -Force
+                if (Test-Path "C:\nginx-1.26.3") {
+                    if (Test-Path $destDir) { Remove-Item $destDir -Recurse -Force -ErrorAction SilentlyContinue }
+                    Rename-Item "C:\nginx-1.26.3" $destDir -ErrorAction SilentlyContinue
+                }
+            } catch {
+                Write-Err "No se pudo descargar Nginx y no se encontro '$destZip'."
+                Write-Host "Copia el archivo 'nginx-1.26.3.zip' a '$destZip' manualmente." -ForegroundColor Yellow
+                return
+            }
         }
-    } else {
-        Write-Info "Nginx ya descargado en $destDir"
     }
 
     # Asegurar que el directorio de conf existe antes de llamar a Set-NginxConfig
@@ -201,6 +197,10 @@ function Install-NginxManual {
 # Genera nginx.conf sin BOM
 function Set-NginxConfig {
     param([int]$Puerto)
+
+    # Asegurar que el directorio de conf existe
+    $dir = Split-Path -Parent $script:NGINX_CONF
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
 
     $contenido = @"
 worker_processes  1;
@@ -386,14 +386,8 @@ function Show-ChangePortMenu {
             # Actualizar index.html
             Set-Content "$script:IIS_WEBROOT\index.html" "<html><head><meta charset='UTF-8'><title>IIS - Practica 6</title><style>body{font-family:Segoe UI;background:#1a1a2e;color:#eee;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:#16213e;border-radius:12px;padding:40px 60px;text-align:center}h1{color:#4fc3f7}.badge{background:#e94560;color:#fff;border-radius:6px;padding:4px 14px;margin:4px;display:inline-block}</style></head><body><div class='card'><h1>IIS</h1><span class='badge'>Servidor: IIS</span><span class='badge'>Version: 10.0</span><span class='badge'>Puerto: $p</span></div></body></html>"
             Set-FirewallRule -Puerto $p -Servicio "IIS"
-            Restart-Service W3SVC -ErrorAction SilentlyContinue
-            $site = Get-Website -Name "Default Web Site" -ErrorAction SilentlyContinue
-            if ($site) {
-                if ($site.applicationPool) { Start-WebAppPool -Name $site.applicationPool -ErrorAction SilentlyContinue }
-                Start-Website -Name "Default Web Site" -ErrorAction SilentlyContinue
-            }
-            Write-Ok "Puerto IIS cambiado a $p. Esperando a que el servicio responda..."
-            Start-Sleep -Seconds 3
+            Set-IISSecurity -SiteName "Default Web Site"
+            Write-Ok "Puerto IIS cambiado a $p."
             curl.exe -I "http://127.0.0.1:$p"
         }
         "2" {
