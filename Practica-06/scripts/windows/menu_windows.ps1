@@ -6,7 +6,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Paeth
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $FunctionsFile = Join-Path $ScriptDir 'http_functions.ps1'
 $script:LibraryLoaded = $false
 
