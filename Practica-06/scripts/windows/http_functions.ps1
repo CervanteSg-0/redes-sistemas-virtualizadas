@@ -1,270 +1,73 @@
-# ============================================================================
-# http_functions.ps1
-# Practica 6 - Windows Server 2022 - Aprovisionamiento HTTP
-# Libreria de funciones para menu_windows.ps1
-# ============================================================================
+# ==============================================================================
+# http_functions.ps1 - Libreria de funciones HTTP para Windows Server
+# Practica 6 | Windows Server 2022
+# Ejecucion: PowerShell directo como Administrador
+# Gestor de paquetes: deteccion automatica Winget -> Chocolatey -> instala Choco
+# ==============================================================================
 
-Set-StrictMode -Version Latest
-$ErrorActionPreference = 'Stop'
+# ------------------------------------------------------------------------------
+# FUNCIONES DE SALIDA / LOG
+# ------------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# CONFIG GLOBAL
-# ---------------------------------------------------------------------------
-
-$script:APACHE_SVC_NAMES = @('Apache24','Apache2.4','apache-httpd')
-$script:NGINX_SVC        = 'Nginx'
-$script:IIS_SITE         = 'Default Web Site'
-$script:IIS_APPPOOL      = 'DefaultAppPool'
-$script:IIS_WEBROOT      = 'C:\inetpub\wwwroot'
-$script:NGINX_ROOT       = 'C:\nginx'
-$script:NGINX_CONF       = 'C:\nginx\conf\nginx.conf'
-$script:NGINX_HTML       = 'C:\nginx\html'
-$script:NSSM_PATHS       = @(
-    'C:\nssm\win64\nssm.exe',
-    'C:\nssm\nssm.exe',
-    'C:\Windows\System32\nssm.exe',
-    'C:\ProgramData\chocolatey\bin\nssm.exe'
-)
-$script:RESERVED_PORTS   = @(20,21,22,23,25,53,67,68,69,110,123,135,137,138,139,143,161,162,389,443,445,465,514,587,636,993,995,1433,1434,1521,2049,3306,3389,5432,5900,5985,5986)
-$script:PKG_MANAGER      = $null
-
-# ---------------------------------------------------------------------------
-# SALIDA / UI
-# ---------------------------------------------------------------------------
+function Write-Info    { param($msg) Write-Host "[INFO]  $msg" -ForegroundColor Cyan    }
+function Write-Ok      { param($msg) Write-Host "[OK]    $msg" -ForegroundColor Green   }
+function Write-Warn    { param($msg) Write-Host "[WARN]  $msg" -ForegroundColor Yellow  }
+function Write-Err     { param($msg) Write-Host "[ERROR] $msg" -ForegroundColor Red     }
 
 function Write-Section {
-    param([string]$Text)
-    Write-Host ''
-    Write-Host '============================================================' -ForegroundColor Blue
-    Write-Host " $Text" -ForegroundColor Cyan
-    Write-Host '============================================================' -ForegroundColor Blue
+    param($msg)
+    Write-Host ""
+    Write-Host "  ==================================================" -ForegroundColor Blue
+    Write-Host "    $msg"                                              -ForegroundColor Blue
+    Write-Host "  ==================================================" -ForegroundColor Blue
+    Write-Host ""
 }
 
-function Write-Info {
-    param([string]$Text)
-    Write-Host "[INFO] $Text" -ForegroundColor Cyan
-}
+# ------------------------------------------------------------------------------
+# VALIDACIONES
+# ------------------------------------------------------------------------------
 
-function Write-Ok {
-    param([string]$Text)
-    Write-Host "[OK]   $Text" -ForegroundColor Green
-}
-
-function Write-Warn {
-    param([string]$Text)
-    Write-Host "[WARN] $Text" -ForegroundColor Yellow
-}
-
-function Write-Err {
-    param([string]$Text)
-    Write-Host "[ERR]  $Text" -ForegroundColor Red
-}
-
-function Assert-Admin {
-    $current = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $principal = New-Object Security.Principal.WindowsPrincipal($current)
-    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)) {
-        throw 'Este script debe ejecutarse como Administrador.'
+function Test-Admin {
+    $current = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+    if (-not $current.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        Write-Err "Este script debe ejecutarse como Administrador."
+        Write-Host "  Clic derecho en PowerShell -> Ejecutar como administrador" -ForegroundColor Yellow
+        exit 1
     }
+    Write-Ok "Ejecutando como Administrador en Windows Server 2022."
 }
 
-# ---------------------------------------------------------------------------
-# HELPERS
-# ---------------------------------------------------------------------------
-
-function Wait-ForPortListener {
-    param(
-        [int]$Puerto,
-        [int]$TimeoutSeconds = 20
-    )
-
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    do {
-        $listener = Get-NetTCPConnection -State Listen -LocalPort $Puerto -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($listener) { return $listener }
-        Start-Sleep -Milliseconds 750
-    } while ((Get-Date) -lt $deadline)
-
-    return $null
-}
-
-function Test-HttpEndpoint {
-    param(
-        [int]$Puerto,
-        [int]$TimeoutSeconds = 20,
-        [string]$Path = '/'
-    )
-
-    $url = "http://127.0.0.1:$Puerto$Path"
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-
-    do {
-        try {
-            try {
-                $resp = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5
-            } catch {
-                $resp = Invoke-WebRequest -Uri $url -TimeoutSec 5
-            }
-            return [pscustomobject]@{
-                Success    = $true
-                Url        = $url
-                StatusCode = [int]$resp.StatusCode
-                Error      = $null
-            }
-        } catch {
-            Start-Sleep -Milliseconds 750
-        }
-    } while ((Get-Date) -lt $deadline)
-
-    return [pscustomobject]@{
-        Success    = $false
-        Url        = $url
-        StatusCode = $null
-        Error      = 'Sin respuesta HTTP valida en localhost.'
+function Test-InputSafe {
+    param([string]$Valor, [string]$Campo)
+    if ([string]::IsNullOrWhiteSpace($Valor)) {
+        Write-Err "El campo '$Campo' no puede estar vacio."
+        return $false
     }
-}
-
-function Get-LocalIPv4List {
-    try {
-        return @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop |
-            Where-Object {
-                $_.IPAddress -notlike '127.*' -and
-                $_.IPAddress -notlike '169.254.*' -and
-                $_.PrefixOrigin -ne 'WellKnown'
-            } |
-            Select-Object -ExpandProperty IPAddress -Unique)
-    } catch {
-        return @()
+    if ($Valor -match '[;|&`<>\"' + "'" + '\\]') {
+        Write-Err "El campo '$Campo' contiene caracteres no permitidos."
+        return $false
     }
-}
-
-function Show-AccessInfo {
-    param(
-        [string]$Servicio,
-        [int]$Puerto,
-        [string]$Webroot
-    )
-
-    Write-Section "$Servicio listo"
-    Write-Host "URL local : http://localhost:$Puerto" -ForegroundColor Green
-
-    $ips = Get-LocalIPv4List
-    foreach ($ip in $ips) {
-        Write-Host "URL red   : http://$ip`:$Puerto" -ForegroundColor Green
-    }
-
-    Write-Host "Webroot   : $Webroot" -ForegroundColor Green
-    Write-Host 'Nota: en IIS es normal que el listener aparezca como PID 4 (System/HTTP.sys).' -ForegroundColor DarkYellow
-    Write-Host 'Si la VM esta en NAT, para acceder desde el host puede requerirse modo puente o port forwarding.' -ForegroundColor DarkYellow
-}
-
-function Import-IISModules {
-    Import-Module ServerManager -ErrorAction SilentlyContinue
-    Import-Module WebAdministration -ErrorAction Stop
-}
-
-function Get-IISBindingObject {
-    Import-IISModules
-    return Get-WebBinding -Name $script:IIS_SITE -Protocol 'http' -ErrorAction SilentlyContinue | Select-Object -First 1
-}
-
-function Remove-IISHttpBindings {
-    Import-IISModules
-    $bindings = @(Get-WebBinding -Name $script:IIS_SITE -Protocol 'http' -ErrorAction SilentlyContinue)
-    foreach ($binding in $bindings) {
-        Remove-WebBinding -Name $script:IIS_SITE -Protocol 'http' -BindingInformation $binding.bindingInformation -ErrorAction SilentlyContinue
-    }
-}
-
-function Ensure-ApacheService {
-    $defaultApacheSvc = $script:APACHE_SVC_NAMES[0]
-    $svcName = Get-ApacheServiceName
-    if (Get-Service -Name $svcName -ErrorAction SilentlyContinue) {
-        return $svcName
-    }
-
-    $exe = Get-ApacheExePath
-    if (-not (Test-Path $exe)) {
-        throw "No se encontro httpd.exe en $exe"
-    }
-
-    Write-Info 'Registrando servicio de Apache...'
-    & $exe -k install -n $defaultApacheSvc | Out-Null
-    Start-Sleep -Seconds 2
-
-    $svcName = Get-ApacheServiceName
-    if (-not (Get-Service -Name $svcName -ErrorAction SilentlyContinue)) {
-        throw 'No se pudo registrar el servicio de Apache.'
-    }
-
-    return $svcName
-}
-
-function Test-ServiceReady {
-    param(
-        [ValidateSet('IIS','Apache','Nginx')][string]$Servicio,
-        [int]$Puerto,
-        [int]$TimeoutSeconds = 20
-    )
-
-    $listener = Wait-ForPortListener -Puerto $Puerto -TimeoutSeconds $TimeoutSeconds
-    $http = Test-HttpEndpoint -Puerto $Puerto -TimeoutSeconds $TimeoutSeconds
-
-    return [pscustomobject]@{
-        Servicio = $Servicio
-        Puerto   = $Puerto
-        Listener = $listener
-        Http     = $http
-        Ready    = [bool]($listener -and $http.Success)
-    }
-}
-
-# ---------------------------------------------------------------------------
-# VALIDACION / PUERTOS
-# ---------------------------------------------------------------------------
-
-function Test-ReservedPort {
-    param(
-        [int]$Puerto,
-        [string]$Servicio = ''
-    )
-
-    if ($Puerto -notin $script:RESERVED_PORTS) { return $false }
-
-    switch ($Servicio) {
-        'IIS'    { if ($Puerto -eq 80) { return $false } }
-        'Apache' { if ($Puerto -eq 80) { return $false } }
-        'Nginx'  { if ($Puerto -eq 80) { return $false } }
-    }
-
     return $true
 }
 
 function Test-Port {
-    param(
-        [int]$Puerto,
-        [string]$Servicio = '',
-        [int]$AllowCurrent = 0
-    )
+    param([int]$Puerto)
 
     if ($Puerto -lt 1 -or $Puerto -gt 65535) {
-        Write-Warn 'El puerto debe estar entre 1 y 65535.'
+        Write-Err "Puerto $Puerto fuera de rango valido (1-65535)."
         return $false
     }
 
-    if (Test-ReservedPort -Puerto $Puerto -Servicio $Servicio) {
-        Write-Warn "El puerto $Puerto esta reservado para otros servicios del sistema."
+    $Reservados = @(21, 22, 23, 25, 53, 110, 143, 389, 443, 445,
+                    3306, 3389, 5432, 5985, 5986, 6379, 8443, 27017)
+    if ($Reservados -contains $Puerto) {
+        Write-Err "Puerto $Puerto reservado para otro servicio del sistema."
         return $false
     }
 
-    $existing = @(Get-NetTCPConnection -State Listen -LocalPort $Puerto -ErrorAction SilentlyContinue |
-        Select-Object -ExpandProperty OwningProcess -Unique)
-
-    if ($existing.Count -gt 0) {
-        if ($AllowCurrent -and $existing.Count -eq 1 -and $existing[0] -eq $AllowCurrent) {
-            return $true
-        }
-        Write-Warn "El puerto $Puerto ya esta en uso por PID(s): $($existing -join ', ')."
+    $enUso = Get-NetTCPConnection -LocalPort $Puerto -ErrorAction SilentlyContinue
+    if ($enUso) {
+        Write-Err "Puerto $Puerto ya esta en uso por otro proceso."
         return $false
     }
 
@@ -272,1006 +75,601 @@ function Test-Port {
 }
 
 function Get-PortFromUser {
-    param(
-        [string]$Servicio,
-        [int]$Default
-    )
+    param([string]$Servicio, [int]$Default = 80)
+
+    Write-Host ""
+    Write-Host "  Configuracion de puerto para: $Servicio" -ForegroundColor White
+    Write-Host "  Puertos sugeridos : 80, 8080, 8888"      -ForegroundColor Gray
+    Write-Host "  Bloqueados        : 22, 53, 443, 3389, 3306 (entre otros)" -ForegroundColor Gray
+    Write-Host ""
 
     do {
-        $raw = Read-Host "Puerto para $Servicio [$Default]"
+        $raw = Read-Host "  Puerto deseado [default: $Default]"
         if ([string]::IsNullOrWhiteSpace($raw)) { $raw = "$Default" }
 
         if ($raw -notmatch '^\d+$') {
-            Write-Warn 'Ingresa solo numeros.'
-            $ok = $false
-        } else {
-            $ok = Test-Port -Puerto ([int]$raw) -Servicio $Servicio
+            Write-Warn "Solo se permiten numeros enteros."
+            $valido = $false
+            continue
         }
-    } until ($ok)
+        $puerto = [int]$raw
+        $valido = Test-Port -Puerto $puerto
+    } while (-not $valido)
 
-    return [int]$raw
+    return $puerto
 }
 
-# ---------------------------------------------------------------------------
-# GESTOR DE PAQUETES / VERSIONES
-# ---------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# GESTOR DE PAQUETES: deteccion automatica
+# Orden: Winget -> Chocolatey ya instalado -> instalar Chocolatey
+# ------------------------------------------------------------------------------
+
+$script:PKG_MANAGER = $null
 
 function Initialize-PackageManager {
+    Write-Info "Detectando gestor de paquetes disponible..."
+
     if (Get-Command winget -ErrorAction SilentlyContinue) {
-        $script:PKG_MANAGER = 'winget'
+        $script:PKG_MANAGER = "winget"
+        Write-Ok "Winget detectado: $(winget --version)"
         return
     }
 
     if (Get-Command choco -ErrorAction SilentlyContinue) {
-        $script:PKG_MANAGER = 'choco'
+        $script:PKG_MANAGER = "choco"
+        Write-Ok "Chocolatey detectado: $(choco --version)"
         return
     }
 
-    $script:PKG_MANAGER = $null
+    Write-Warn "Sin gestor de paquetes. Instalando Chocolatey automaticamente..."
+    Install-Chocolatey
+
+    if (Get-Command choco -ErrorAction SilentlyContinue) {
+        $script:PKG_MANAGER = "choco"
+        Write-Ok "Chocolatey instalado y listo."
+    } else {
+        Write-Err "No se pudo inicializar ningun gestor de paquetes."
+        exit 1
+    }
 }
 
+function Install-Chocolatey {
+    try {
+        Set-ExecutionPolicy Bypass -Scope Process -Force
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
+        Invoke-Expression (
+            (New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1')
+        )
+        $env:PATH             += ";$env:ALLUSERSPROFILE\chocolatey\bin"
+        $env:ChocolateyInstall  = "$env:ALLUSERSPROFILE\chocolatey"
+    } catch {
+        Write-Err "Error instalando Chocolatey: $_"
+    }
+}
+
+# ------------------------------------------------------------------------------
+# CONSULTA DINAMICA DE VERSIONES (sin hardcodear)
+# ------------------------------------------------------------------------------
+
 function Get-AvailableVersions {
-    param([ValidateSet('Apache','Nginx')][string]$Paquete)
+    param([string]$Paquete)
 
-    Initialize-PackageManager
-    $versions = @()
+    Write-Info "Consultando versiones de '$Paquete' ($script:PKG_MANAGER)..."
+    $versiones = @()
 
-    if ($Paquete -eq 'Apache') {
-        if ($script:PKG_MANAGER -eq 'winget') {
-            try {
-                $versions += @(winget show Apache.Httpd --versions 2>$null | Where-Object { $_ -match '^\d' })
-            } catch {}
-        }
-        if ($script:PKG_MANAGER -eq 'choco' -or $versions.Count -eq 0) {
-            try {
-                $versions += @(choco list apache-httpd --all --exact 2>$null |
-                    Where-Object { $_ -match '^apache-httpd\s+\d' } |
-                    ForEach-Object { ($_ -split '\s+')[1] })
-            } catch {}
-        }
+    if ($script:PKG_MANAGER -eq "winget") {
+        try {
+            $raw = winget show $Paquete --versions 2>$null | Where-Object { $_ -match '^\d' }
+            $versiones = @($raw | Select-Object -Unique)
+        } catch {}
     }
 
-    if ($Paquete -eq 'Nginx') {
-        if ($script:PKG_MANAGER -eq 'winget') {
-            try {
-                $versions += @(winget show Nginx.Nginx --versions 2>$null | Where-Object { $_ -match '^\d' })
-            } catch {}
-        }
-        if ($script:PKG_MANAGER -eq 'choco' -or $versions.Count -eq 0) {
-            try {
-                $versions += @(choco list nginx --all --exact 2>$null |
-                    Where-Object { $_ -match '^nginx\s+\d' } |
-                    ForEach-Object { ($_ -split '\s+')[1] })
-            } catch {}
-        }
+    if ($script:PKG_MANAGER -eq "choco" -or $versiones.Count -eq 0) {
+        try {
+            $raw = choco list $Paquete --all --exact 2>$null |
+                   Where-Object  { $_ -match "^\S+ \d" } |
+                   ForEach-Object { ($_ -split '\s+')[1] } |
+                   Where-Object  { $_ -match '^\d' }
+            if ($raw) { $versiones = @($raw | Select-Object -Unique) }
+        } catch {}
     }
 
-    $versions = @($versions | Where-Object { $_ } | Select-Object -Unique)
-    if ($versions.Count -eq 0) {
-        return @('latest','stable')
+    if ($versiones.Count -eq 0) {
+        Write-Warn "Sin versiones en repositorio para '$Paquete'. Se usara 'latest'."
+        return @("latest")
     }
 
-    return $versions
+    return $versiones
 }
 
 function Select-Version {
-    param([ValidateSet('Apache','Nginx')][string]$Paquete)
+    param([string]$Paquete)
 
-    $versions = Get-AvailableVersions -Paquete $Paquete
-    Write-Host ''
-    Write-Host "Versiones disponibles para ${Paquete}:" -ForegroundColor White
+    $versiones = Get-AvailableVersions -Paquete $Paquete
 
-    for ($i = 0; $i -lt $versions.Count; $i++) {
-        $tag = ''
-        if ($i -eq 0) {
-            $tag = ' [Latest/Desarrollo]'
-        } elseif ($i -eq ($versions.Count - 1) -and $versions.Count -gt 1) {
-            $tag = ' [LTS/Estable]'
+    Write-Host ""
+    Write-Host "  Versiones disponibles para ${Paquete}:" -ForegroundColor White
+    Write-Host "  [Latest] = Mas reciente / Desarrollo     [LTS] = Estable" -ForegroundColor Gray
+    Write-Host ""
+
+    $i = 1
+    foreach ($ver in $versiones) {
+        if ($i -eq 1) {
+            Write-Host "    $i) $ver " -NoNewline
+            Write-Host "[Latest / Desarrollo]" -ForegroundColor Yellow
+        } elseif ($i -eq $versiones.Count -and $versiones.Count -gt 1) {
+            Write-Host "    $i) $ver " -NoNewline
+            Write-Host "[LTS / Estable]" -ForegroundColor Green
+        } else {
+            Write-Host "    $i) $ver"
         }
-        Write-Host ("  {0}) {1}{2}" -f ($i + 1), $versions[$i], $tag)
+        $i++
     }
+    Write-Host ""
 
     do {
-        $sel = Read-Host "Selecciona version [1-$($versions.Count)]"
-        $ok = ($sel -match '^\d+$') -and ([int]$sel -ge 1) -and ([int]$sel -le $versions.Count)
-        if (-not $ok) { Write-Warn 'Seleccion invalida.' }
-    } until ($ok)
+        $sel    = Read-Host "  Selecciona version [1-$($versiones.Count)]"
+        $valido = ($sel -match '^\d+$') -and ([int]$sel -ge 1) -and ([int]$sel -le $versiones.Count)
+        if (-not $valido) {
+            Write-Warn "Seleccion invalida. Ingresa un numero entre 1 y $($versiones.Count)."
+        }
+    } while (-not $valido)
 
-    return $versions[[int]$sel - 1]
+    $elegida = $versiones[[int]$sel - 1]
+    Write-Ok "Version seleccionada: $elegida"
+    return $elegida
 }
 
-# ---------------------------------------------------------------------------
-# DETECCION DE RUTAS / ESTADOS
-# ---------------------------------------------------------------------------
+function Install-Package {
+    param([string]$Paquete, [string]$Version = "latest")
 
-function Get-ApacheServiceName {
-    foreach ($name in $script:APACHE_SVC_NAMES) {
-        if (Get-Service -Name $name -ErrorAction SilentlyContinue) {
-            return $name
-        }
-    }
+    # Normalizar: si version es "latest" o no es un numero valido, instalar sin --version
+    $usarVersion = ($Version -ne "latest") -and ($Version -match '^\d')
 
-    try {
-        $svc = Get-CimInstance Win32_Service -ErrorAction Stop |
-            Where-Object { $_.PathName -match 'httpd\.exe' } |
-            Select-Object -First 1
-        if ($svc) { return $svc.Name }
-    } catch {}
-
-    return $script:APACHE_SVC_NAMES[0]
-}
-
-function Get-ApacheInstallRoot {
-    $svcName = Get-ApacheServiceName
-
-    try {
-        $svc = Get-CimInstance Win32_Service -Filter "Name='$svcName'" -ErrorAction Stop
-        if ($svc -and $svc.PathName -match '"?([^" ]+httpd\.exe)') {
-            return Split-Path (Split-Path $matches[1] -Parent) -Parent
-        }
-    } catch {}
-
-    $candidates = @(
-        'C:\Apache24',
-        'C:\tools\Apache24',
-        'C:\Program Files\Apache24',
-        'C:\Program Files (x86)\Apache24',
-        'C:\Program Files\Apache Software Foundation\Apache2.4',
-        'C:\Program Files (x86)\Apache Software Foundation\Apache2.4'
-    )
-
-    foreach ($root in $candidates) {
-        if (Test-Path (Join-Path $root 'bin\httpd.exe')) {
-            return $root
-        }
-    }
-
-    return 'C:\Apache24'
-}
-
-function Get-ApacheConfPath {
-    return (Join-Path (Get-ApacheInstallRoot) 'conf\httpd.conf')
-}
-
-function Get-ApacheWebRoot {
-    return (Join-Path (Get-ApacheInstallRoot) 'htdocs')
-}
-
-function Get-ApacheExePath {
-    return (Join-Path (Get-ApacheInstallRoot) 'bin\httpd.exe')
-}
-
-function Get-ServiceConfiguredPort {
-    param([ValidateSet('IIS','Apache','Nginx')][string]$Servicio)
-
-    switch ($Servicio) {
-        'IIS' {
-            try {
-                $binding = Get-IISBindingObject
-                if ($binding) {
-                    return [int](($binding.bindingInformation -split ':')[1])
-                }
-            } catch {}
-        }
-
-        'Apache' {
-            $conf = Get-ApacheConfPath
-            if (Test-Path $conf) {
-                $line = Get-Content $conf | Where-Object { $_ -match '^Listen\s+' } | Select-Object -First 1
-                if ($line -match ':(\d+)$') { return [int]$matches[1] }
-                if ($line -match '^Listen\s+(\d+)$') { return [int]$matches[1] }
-            }
-        }
-
-        'Nginx' {
-            if (Test-Path $script:NGINX_CONF) {
-                $line = Get-Content $script:NGINX_CONF | Where-Object { $_ -match '^\s*listen\s+\d+' } | Select-Object -First 1
-                if ($line -match 'listen\s+(\d+)') { return [int]$matches[1] }
-            }
-        }
-    }
-
-    return $null
-}
-
-function Get-IISRealStatus {
-    $result = [ordered]@{
-        ConfiguredPort = $null
-        SiteState      = 'Unknown'
-        Listening      = $false
-        ListenerPID    = $null
-        ProcessName    = $null
-        IsActive       = $false
-    }
-
-    try {
-        Import-IISModules
-        $site = Get-Website -Name $script:IIS_SITE -ErrorAction Stop
-        $result.SiteState = [string]$site.State
-
-        $binding = Get-IISBindingObject
-        if ($binding) {
-            $result.ConfiguredPort = [int](($binding.bindingInformation -split ':')[1])
-            $listen = Get-NetTCPConnection -State Listen -LocalPort $result.ConfiguredPort -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($listen) {
-                $result.Listening = $true
-                $result.ListenerPID = $listen.OwningProcess
-                if ($listen.OwningProcess -eq 4) {
-                    $result.ProcessName = 'System/HTTP.sys'
-                } else {
-                    try {
-                        $result.ProcessName = (Get-Process -Id $listen.OwningProcess -ErrorAction Stop).ProcessName
-                    } catch {
-                        $result.ProcessName = 'Desconocido'
-                    }
-                }
-            }
-        }
-
-        if ($result.SiteState -eq 'Started' -and $result.Listening) {
-            $result.IsActive = $true
-        }
-    } catch {}
-
-    return [pscustomobject]$result
-}
-
-function Get-ServiceStateSummary {
-    param([ValidateSet('IIS','Apache','Nginx')][string]$Servicio)
-
-    switch ($Servicio) {
-        'IIS' {
-            $iis = Get-IISRealStatus
-            return [pscustomobject]@{
-                Name           = 'IIS'
-                ConfiguredPort = $iis.ConfiguredPort
-                RealPort       = $(if ($iis.Listening) { $iis.ConfiguredPort } else { $null })
-                Running        = $iis.IsActive
-                Detail         = $(if ($iis.ConfiguredPort -and -not $iis.IsActive) { 'Configurado sin escucha real' } else { '' })
-            }
-        }
-
-        'Apache' {
-            $svcName = Get-ApacheServiceName
-            $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
-            $port = Get-ServiceConfiguredPort -Servicio 'Apache'
-            $listen = $null
-            if ($port) {
-                $listen = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue | Select-Object -First 1
-            }
-            return [pscustomobject]@{
-                Name           = 'Apache'
-                ConfiguredPort = $port
-                RealPort       = $(if ($listen) { $port } else { $null })
-                Running        = [bool]($svc -and $svc.Status -eq 'Running' -and $listen)
-                Detail         = $(if ($svc -and $svc.Status -eq 'Running' -and -not $listen -and $port) { 'Servicio arriba sin listener real' } else { '' })
-            }
-        }
-
-        'Nginx' {
-            $svc = Get-Service -Name $script:NGINX_SVC -ErrorAction SilentlyContinue
-            $port = Get-ServiceConfiguredPort -Servicio 'Nginx'
-            $listen = $null
-            if ($port) {
-                $listen = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue | Select-Object -First 1
-            }
-            return [pscustomobject]@{
-                Name           = 'Nginx'
-                ConfiguredPort = $port
-                RealPort       = $(if ($listen) { $port } else { $null })
-                Running        = [bool]($svc -and $svc.Status -eq 'Running' -and $listen)
-                Detail         = $(if ($svc -and $svc.Status -eq 'Running' -and -not $listen -and $port) { 'Servicio arriba sin listener real' } else { '' })
-            }
-        }
-    }
-}
-
-function Get-ListeningTable {
-    $rows = @()
-
-    foreach ($svc in @('IIS','Apache','Nginx')) {
-        $port = Get-ServiceConfiguredPort -Servicio $svc
-        if (-not $port) { continue }
-
-        $listen = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue | Select-Object -First 1
-        if (-not $listen) { continue }
-
-        $procName = 'Desconocido'
-        if ($listen.OwningProcess -eq 4) {
-            $procName = 'System/HTTP.sys'
+    if ($script:PKG_MANAGER -eq "winget") {
+        if ($usarVersion) {
+            winget install --id $Paquete --version $Version --silent --accept-package-agreements --accept-source-agreements
         } else {
-            try {
-                $procName = (Get-Process -Id $listen.OwningProcess -ErrorAction Stop).ProcessName
-            } catch {}
+            winget install --id $Paquete --silent --accept-package-agreements --accept-source-agreements
         }
-
-        $rows += [pscustomobject]@{
-            Servicio = $svc
-            Puerto   = $port
-            PID      = $listen.OwningProcess
-            Proceso  = $procName
+    } else {
+        if ($usarVersion) {
+            choco install $Paquete --version $Version --yes --no-progress --allow-downgrade
+        } else {
+            choco install $Paquete --yes --no-progress
         }
     }
-
-    return $rows
 }
 
-# ---------------------------------------------------------------------------
-# FIREWALL / INDEX / PERMISOS
-# ---------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# FIREWALL
+# ------------------------------------------------------------------------------
 
 function Set-FirewallRule {
-    param(
-        [int]$Puerto,
-        [string]$Servicio,
-        [int]$PuertoAnterior = 0
-    )
+    param([int]$Puerto, [int]$PuertoAnterior = 0, [string]$Servicio = "HTTP")
+
+    Write-Section "Configurando Firewall de Windows"
 
     if ($PuertoAnterior -gt 0 -and $PuertoAnterior -ne $Puerto) {
-        $oldNames = @(
-            "$Servicio-Puerto-$PuertoAnterior",
-            "HTTP-Custom-$PuertoAnterior",
-            "$Servicio-$PuertoAnterior"
-        )
-        foreach ($n in $oldNames) {
-            Get-NetFirewallRule -DisplayName $n -ErrorAction SilentlyContinue |
-                Remove-NetFirewallRule -ErrorAction SilentlyContinue
+        $nombreAnt = "$Servicio-Puerto-$PuertoAnterior"
+        if (Get-NetFirewallRule -DisplayName $nombreAnt -ErrorAction SilentlyContinue) {
+            Remove-NetFirewallRule -DisplayName $nombreAnt -ErrorAction SilentlyContinue
+            Write-Ok "Regla anterior '$nombreAnt' eliminada."
         }
     }
 
-    $name = "$Servicio-Puerto-$Puerto"
-    if (-not (Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue)) {
-        New-NetFirewallRule -DisplayName $name -Direction Inbound -Protocol TCP -LocalPort $Puerto -Action Allow -Profile Any | Out-Null
-        Write-Ok "Regla de firewall creada para $Servicio en puerto $Puerto."
+    $nombreNuevo = "$Servicio-Puerto-$Puerto"
+    if (-not (Get-NetFirewallRule -DisplayName $nombreNuevo -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule `
+            -DisplayName $nombreNuevo `
+            -Direction   Inbound `
+            -Protocol    TCP `
+            -LocalPort   $Puerto `
+            -Action      Allow `
+            -Profile     Any `
+            -ErrorAction Stop | Out-Null
+        Write-Ok "Regla creada: TCP $Puerto abierto para $Servicio."
+    } else {
+        Write-Ok "Regla de firewall para puerto $Puerto ya existia."
     }
 }
 
+# ------------------------------------------------------------------------------
+# PAGINA INDEX PERSONALIZADA
+# ------------------------------------------------------------------------------
+
 function New-IndexPage {
-    param(
-        [string]$Servicio,
-        [string]$Version,
-        [int]$Puerto,
-        [string]$Webroot
-    )
+    param([string]$Servicio, [string]$Version, [int]$Puerto, [string]$Webroot)
 
     if (-not (Test-Path $Webroot)) {
         New-Item -ItemType Directory -Path $Webroot -Force | Out-Null
     }
 
     $html = @"
-<!doctype html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="utf-8">
-    <title>$Servicio</title>
+    <meta charset="UTF-8">
+    <title>$Servicio - Practica 6</title>
+    <style>
+        body { font-family: Segoe UI, sans-serif; background: #1a1a2e; color: #eee;
+               display: flex; justify-content: center; align-items: center;
+               height: 100vh; margin: 0; }
+        .card { background: #16213e; border-radius: 12px; padding: 40px 60px;
+                box-shadow: 0 8px 32px rgba(0,0,0,.5); text-align: center; }
+        h1 { color: #4fc3f7; font-size: 2.2em; margin-bottom: .3em; }
+        .badge { display: inline-block; background: #e94560; color: #fff;
+                 border-radius: 6px; padding: 4px 14px; font-size: .9em; margin: 6px 4px; }
+        .info { color: #a8b2d8; margin-top: 1em; font-size: .95em; }
+    </style>
 </head>
-<body style="font-family:Segoe UI;background:#111827;color:#f9fafb;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;">
-    <div style="background:#1f2937;padding:32px 44px;border-radius:16px;box-shadow:0 12px 30px rgba(0,0,0,.35);text-align:center;">
-        <h1 style="margin:0 0 12px 0;color:#60a5fa;">$Servicio</h1>
-        <p>Servidor: <b>$Servicio</b></p>
-        <p>Version: <b>$Version</b></p>
-        <p>Puerto: <b>$Puerto</b></p>
-        <p>Practica 6 - Windows Server 2022</p>
+<body>
+    <div class="card">
+        <h1>$Servicio</h1>
+        <div>
+            <span class="badge">Servidor: $Servicio</span>
+            <span class="badge">Version: $Version</span>
+            <span class="badge">Puerto: $Puerto</span>
+        </div>
+        <p class="info">Aprovisionado automaticamente - Practica 6 - Windows Server 2022</p>
     </div>
 </body>
 </html>
 "@
-
-    Set-Content -Path (Join-Path $Webroot 'index.html') -Value $html -Encoding UTF8
+    Set-Content -Path "$Webroot\index.html" -Value $html -Encoding UTF8
     Write-Ok "index.html creado en $Webroot"
 }
 
+# ------------------------------------------------------------------------------
+# PERMISOS NTFS RESTRINGIDOS
+# ------------------------------------------------------------------------------
+
 function Set-WebRootPermissions {
-    param(
-        [string]$Webroot,
-        [string]$Identity = 'Users'
-    )
+    param([string]$Webroot, [string]$ServiceUser = "NETWORK SERVICE")
 
     if (-not (Test-Path $Webroot)) {
         New-Item -ItemType Directory -Path $Webroot -Force | Out-Null
     }
-
     try {
-        & icacls $Webroot /inheritance:e | Out-Null
-        & icacls $Webroot /grant:r "${Identity}:(OI)(CI)(RX)" | Out-Null
-        Write-Ok "Permisos NTFS aplicados: $Identity lectura/ejecucion en $Webroot"
+        $acl = Get-Acl $Webroot
+        $acl.SetAccessRuleProtection($true, $true)
+        $regla = New-Object System.Security.AccessControl.FileSystemAccessRule(
+            $ServiceUser, "ReadAndExecute",
+            "ContainerInherit,ObjectInherit", "None", "Allow"
+        )
+        $acl.SetAccessRule($regla)
+        Set-Acl -Path $Webroot -AclObject $acl
+        Write-Ok "Permisos NTFS: '$ServiceUser' solo lectura en $Webroot"
     } catch {
-        Write-Warn "No se pudieron ajustar permisos NTFS: $($_.Exception.Message)"
+        Write-Warn "No se pudieron ajustar permisos NTFS: $_"
     }
 }
 
-# ---------------------------------------------------------------------------
-# IIS
-# ---------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# UTILIDADES
+# ------------------------------------------------------------------------------
 
-function Ensure-IISInstalled {
-    Import-Module ServerManager -ErrorAction SilentlyContinue
-    Write-Section 'Instalando / habilitando IIS'
-
-    $features = @(
-        'Web-Server',
-        'Web-WebServer',
-        'Web-Common-Http',
-        'Web-Default-Doc',
-        'Web-Static-Content',
-        'Web-Http-Errors',
-        'Web-Http-Logging',
-        'Web-Performance',
-        'Web-Stat-Compression',
-        'Web-Security',
-        'Web-Filtering',
-        'Web-Mgmt-Console'
-    )
-
-    foreach ($f in $features) {
-        $feature = Get-WindowsFeature -Name $f -ErrorAction SilentlyContinue
-        if ($feature -and -not $feature.Installed) {
-            Install-WindowsFeature -Name $f -IncludeManagementTools | Out-Null
-            Write-Ok "Rol habilitado: $f"
+function Get-InstalledVersion {
+    param([string]$Servicio)
+    try {
+        if ($script:PKG_MANAGER -eq "choco") {
+            $line = choco list --local-only 2>$null |
+                    Where-Object { $_ -imatch "^$Servicio\s" } |
+                    Select-Object -First 1
+            if ($line) { return ($line -split '\s+')[1] }
         }
-    }
-}
-
-function Configure-IISSecurity {
-    Import-IISModules
-    Write-Info 'Aplicando seguridad en IIS...'
-
-    try {
-        Set-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Filter 'system.webServer/security/requestFiltering' -Name 'removeServerHeader' -Value $true -ErrorAction SilentlyContinue
+        if ($script:PKG_MANAGER -eq "winget") {
+            $line = winget list --id $Servicio 2>$null |
+                    Where-Object { $_ -match '\d+\.\d+' } |
+                    Select-Object -First 1
+            if ($line -match '(\d[\d.]+)') { return $matches[1] }
+        }
     } catch {}
-
-    $headers = @(
-        @{ name = 'X-Frame-Options'; value = 'SAMEORIGIN' },
-        @{ name = 'X-Content-Type-Options'; value = 'nosniff' },
-        @{ name = 'X-XSS-Protection'; value = '1; mode=block' }
-    )
-
-    foreach ($header in $headers) {
-        try {
-            Remove-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Filter 'system.webServer/httpProtocol/customHeaders' -Name '.' -AtElement @{ name = $header.name } -ErrorAction SilentlyContinue
-        } catch {}
-        try {
-            Add-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Filter 'system.webServer/httpProtocol/customHeaders' -Name '.' -Value $header -ErrorAction SilentlyContinue
-        } catch {}
-    }
-
-    foreach ($verb in @('TRACE','TRACK','DELETE')) {
-        try {
-            Add-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Filter 'system.webServer/security/requestFiltering/verbs' -Name '.' -Value @{ verb = $verb; allowed = 'false' } -ErrorAction SilentlyContinue
-        } catch {}
-    }
-
-    Write-Ok 'Cabeceras de seguridad y filtros HTTP aplicados en IIS.'
+    return "desconocida"
 }
 
-function Restart-IISStack {
-    foreach ($svc in @('WAS','W3SVC')) {
-        try {
-            Set-Service -Name $svc -StartupType Automatic -ErrorAction SilentlyContinue
-        } catch {}
-        try {
-            Start-Service -Name $svc -ErrorAction SilentlyContinue
-        } catch {}
-    }
-    Start-Sleep -Seconds 2
-}
-
-function Set-IISPort {
-    param([int]$Puerto)
-
-    Import-IISModules
-    $prev = Get-ServiceConfiguredPort -Servicio 'IIS'
-
-    if (-not (Test-Path $script:IIS_WEBROOT)) {
-        New-Item -ItemType Directory -Path $script:IIS_WEBROOT -Force | Out-Null
-    }
-
-    if (-not (Test-Path "IIS:\AppPools\$($script:IIS_APPPOOL)")) {
-        New-WebAppPool -Name $script:IIS_APPPOOL | Out-Null
-    }
-
-    if (-not (Get-Website -Name $script:IIS_SITE -ErrorAction SilentlyContinue)) {
-        New-Website -Name $script:IIS_SITE -PhysicalPath $script:IIS_WEBROOT -Port $Puerto -ApplicationPool $script:IIS_APPPOOL | Out-Null
-    } else {
-        Set-ItemProperty "IIS:\Sites\$($script:IIS_SITE)" -Name physicalPath -Value $script:IIS_WEBROOT
-        try {
-            Set-ItemProperty "IIS:\Sites\$($script:IIS_SITE)" -Name applicationPool -Value $script:IIS_APPPOOL
-        } catch {}
-    }
-
-    Stop-Website -Name $script:IIS_SITE -ErrorAction SilentlyContinue
-    Remove-IISHttpBindings
-    New-WebBinding -Name $script:IIS_SITE -Protocol 'http' -IPAddress '*' -Port $Puerto | Out-Null
-
-    Restart-IISStack
-    try {
-        Start-WebAppPool -Name $script:IIS_APPPOOL -ErrorAction SilentlyContinue
-    } catch {}
-    Start-Website -Name $script:IIS_SITE -ErrorAction SilentlyContinue
-
-    Set-FirewallRule -Puerto $Puerto -Servicio 'IIS' -PuertoAnterior $(if ($prev) { $prev } else { 0 })
-
-    $ready = Test-ServiceReady -Servicio 'IIS' -Puerto $Puerto -TimeoutSeconds 25
-    if (-not $ready.Ready) {
-        Write-Warn 'IIS no quedo completamente operativo al primer intento. Se intentara iisreset.'
-        try {
-            & iisreset /restart | Out-Null
-        } catch {}
-        $ready = Test-ServiceReady -Servicio 'IIS' -Puerto $Puerto -TimeoutSeconds 25
-    }
-
-    if (-not $ready.Listener) {
-        throw "IIS no quedo escuchando en el puerto $Puerto."
-    }
-
-    if ($ready.Listener.OwningProcess -eq 4) {
-        Write-Info 'IIS esta escuchando a traves de HTTP.sys (PID 4). Esto es normal en Windows.'
-    } else {
-        Write-Info "IIS listener detectado con PID $($ready.Listener.OwningProcess)."
-    }
-
-    if (-not $ready.Http.Success) {
-        throw "IIS abrio el puerto $Puerto, pero no respondio HTTP correctamente en localhost."
-    }
-
-    Write-Ok "IIS escuchando y respondiendo en puerto $Puerto."
-}
+# ------------------------------------------------------------------------------
+# IIS - Instalacion forzosa (sin gestor de paquetes)
+# ------------------------------------------------------------------------------
 
 function Install-IIS {
     param([int]$Puerto)
 
-    Ensure-IISInstalled
-    Configure-IISSecurity
-    Set-WebRootPermissions -Webroot $script:IIS_WEBROOT -Identity 'IIS_IUSRS'
-    New-IndexPage -Servicio 'IIS' -Version '10.0' -Puerto $Puerto -Webroot $script:IIS_WEBROOT
-    Set-IISPort -Puerto $Puerto
-    Show-AccessInfo -Servicio 'IIS' -Puerto $Puerto -Webroot $script:IIS_WEBROOT
+    Write-Section "Instalando IIS - Internet Information Services"
+
+    $features = @(
+        "Web-Server", "Web-Common-Http", "Web-Static-Content",
+        "Web-Http-Logging", "Web-Security", "Web-Filtering",
+        "Web-Mgmt-Tools", "Web-Mgmt-Console", "Web-Http-Errors"
+    )
+    foreach ($feat in $features) {
+        $r = Install-WindowsFeature -Name $feat -IncludeManagementTools -ErrorAction SilentlyContinue
+        if ($r.Success) { Write-Ok "Rol habilitado: $feat" }
+    }
+
+    Import-Module WebAdministration -ErrorAction Stop
+
+    $iisVer = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\InetStp" -ErrorAction SilentlyContinue).VersionString
+    if (-not $iisVer) { $iisVer = "10.0 (WS2022)" }
+    Write-Ok "IIS listo. Version: $iisVer"
+
+    if ($Puerto -ne 80) {
+        Remove-WebBinding -Name "Default Web Site" -Port 80 -Protocol http -ErrorAction SilentlyContinue
+        Write-Ok "Binding default (80) removido."
+    }
+    Remove-WebBinding -Name "Default Web Site" -Port $Puerto -Protocol http -ErrorAction SilentlyContinue
+    New-WebBinding    -Name "Default Web Site" -Protocol http -Port $Puerto -IPAddress "*"
+    Write-Ok "Binding IIS en puerto $Puerto configurado."
+
+    Set-IISSecurity        -SiteName "Default Web Site"
+    Set-WebRootPermissions -Webroot "C:\inetpub\wwwroot" -ServiceUser "IIS_IUSRS"
+    New-IndexPage          -Servicio "IIS" -Version $iisVer -Puerto $Puerto -Webroot "C:\inetpub\wwwroot"
+    Set-FirewallRule       -Puerto $Puerto -PuertoAnterior 80 -Servicio "IIS"
+
+    Start-Service W3SVC -ErrorAction SilentlyContinue
+    Set-Service   W3SVC -StartupType Automatic
+    Write-Ok "Servicio W3SVC activo."
+
+    Write-Section "IIS listo"
+    Write-Host "  URL     : http://localhost:$Puerto" -ForegroundColor Green
+    Write-Host "  Webroot : C:\inetpub\wwwroot"       -ForegroundColor Green
 }
 
-# ---------------------------------------------------------------------------
-# APACHE
-# ---------------------------------------------------------------------------
+function Set-IISSecurity {
+    param([string]$SiteName = "Default Web Site")
+
+    Write-Info "Aplicando seguridad en IIS..."
+
+    try {
+        Remove-WebConfigurationProperty `
+            -PSPath    "IIS:\Sites\$SiteName" `
+            -Filter    "system.webServer/httpProtocol/customHeaders" `
+            -Name      "." -AtElement @{name = "X-Powered-By"} `
+            -ErrorAction SilentlyContinue
+        Write-Ok "Header X-Powered-By eliminado."
+    } catch {}
+
+    try {
+        Set-WebConfigurationProperty `
+            -PSPath  "IIS:\" `
+            -Filter  "system.webServer/security/requestFiltering" `
+            -Name    "removeServerHeader" -Value $true
+        Write-Ok "Header Server ocultado (removeServerHeader = true)."
+    } catch { Write-Warn "removeServerHeader: $_" }
+
+    $headers = [ordered]@{
+        "X-Frame-Options"        = "SAMEORIGIN"
+        "X-Content-Type-Options" = "nosniff"
+        "X-XSS-Protection"       = "1; mode=block"
+    }
+    foreach ($h in $headers.GetEnumerator()) {
+        try {
+            Remove-WebConfigurationProperty `
+                -PSPath    "IIS:\Sites\$SiteName" `
+                -Filter    "system.webServer/httpProtocol/customHeaders" `
+                -Name      "." -AtElement @{name = $h.Key} -ErrorAction SilentlyContinue
+            Add-WebConfigurationProperty `
+                -PSPath  "IIS:\Sites\$SiteName" `
+                -Filter  "system.webServer/httpProtocol/customHeaders" `
+                -Name    "." -Value @{name = $h.Key; value = $h.Value}
+            Write-Ok "$($h.Key): $($h.Value)"
+        } catch { Write-Warn "No se pudo agregar header $($h.Key): $_" }
+    }
+
+    foreach ($m in @("TRACE", "TRACK", "DELETE")) {
+        try {
+            Add-WebConfigurationProperty `
+                -PSPath  "IIS:\Sites\$SiteName" `
+                -Filter  "system.webServer/security/requestFiltering/verbs" `
+                -Name    "." -Value @{verb = $m; allowed = "false"} `
+                -ErrorAction SilentlyContinue
+        } catch {}
+    }
+    Write-Ok "Metodos TRACE, TRACK, DELETE bloqueados en IIS."
+}
+
+# ------------------------------------------------------------------------------
+# APACHE WINDOWS
+# ------------------------------------------------------------------------------
 
 function Install-ApacheWindows {
-    param(
-        [string]$Version = 'latest',
-        [int]$Puerto
+    param([int]$Puerto, [string]$Version = "latest")
+
+    Write-Section "Instalando Apache HTTP Server (Windows)"
+
+    $pkgId = if ($script:PKG_MANAGER -eq "winget") { "Apache.Httpd" } else { "apache-httpd" }
+    Write-Info "Instalando Apache $Version via $script:PKG_MANAGER..."
+    Install-Package -Paquete $pkgId -Version $Version
+
+    # Buscar httpd.exe en todas las rutas posibles
+    Write-Info "Buscando directorio de Apache..."
+    $buscarEn = @(
+        "C:\Apache24",
+        "C:\tools\Apache24",
+        "$env:ProgramFiles\Apache24",
+        "$env:ProgramFiles\Apache Software Foundation\Apache2.4",
+        "$env:ProgramData\chocolatey\lib\apache-httpd\tools\Apache24",
+        "$env:APPDATA\Apache24"
     )
 
-    Write-Section 'Instalando Apache HTTP Server'
-    Initialize-PackageManager
+    $apacheDir = $buscarEn | Where-Object { Test-Path "$_\bin\httpd.exe" } | Select-Object -First 1
 
-    if ($script:PKG_MANAGER -eq 'winget') {
-        if ($Version -and $Version -ne 'latest' -and $Version -ne 'stable') {
-            winget install --id Apache.Httpd --version $Version --silent --accept-package-agreements --accept-source-agreements
-        } else {
-            winget install --id Apache.Httpd --silent --accept-package-agreements --accept-source-agreements
+    # Fallback: buscar httpd.exe en todo el sistema
+    if (-not $apacheDir) {
+        $hit = Get-ChildItem "$env:APPDATA", "$env:ProgramFiles", "$env:ProgramData", "C:\" `
+               -Recurse -Filter "httpd.exe" -ErrorAction SilentlyContinue |
+               Select-Object -First 1
+        if ($hit) {
+            $apacheDir = Split-Path (Split-Path $hit.FullName -Parent) -Parent
+            Write-Info "Apache encontrado en: $apacheDir"
         }
-    } elseif ($script:PKG_MANAGER -eq 'choco') {
-        if ($Version -and $Version -ne 'latest' -and $Version -ne 'stable') {
-            choco install apache-httpd --version $Version -y --no-progress --allow-downgrade
-        } else {
-            choco install apache-httpd -y --no-progress
-        }
-    } else {
-        throw 'No se detecto winget ni chocolatey para instalar Apache.'
     }
 
-    Start-Sleep -Seconds 5
-    Configure-Apache -Puerto $Puerto -Version $Version
+    if (-not $apacheDir) {
+        Write-Err "No se encontro httpd.exe. Ejecuta manualmente:"
+        Write-Host "  Get-ChildItem \$env:APPDATA -Recurse -Filter httpd.exe" -ForegroundColor Gray
+        return
+    }
+    Write-Ok "Apache encontrado en: $apacheDir"
+
+    $confFile = "$apacheDir\conf\httpd.conf"
+    $webroot  = "$apacheDir\htdocs"
+
+    (Get-Content $confFile) `
+        -replace '^Listen \d+',    "Listen $Puerto" `
+        -replace '^ServerName .*', "ServerName localhost:$Puerto" |
+        Set-Content $confFile
+    Write-Ok "Puerto $Puerto aplicado en httpd.conf."
+
+    Set-ApacheSecurity     -ConfFile $confFile
+    Set-WebRootPermissions -Webroot $webroot -ServiceUser "NETWORK SERVICE"
+
+    $verInstalada = Get-InstalledVersion -Servicio "apache-httpd"
+    New-IndexPage      -Servicio "Apache" -Version $verInstalada -Puerto $Puerto -Webroot $webroot
+    Set-FirewallRule   -Puerto $Puerto -PuertoAnterior 80 -Servicio "Apache"
+
+    $httpd = "$apacheDir\bin\httpd.exe"
+    if (Test-Path $httpd) {
+        & $httpd -k install -n "Apache24" 2>&1 | Out-Null
+        Start-Service "Apache24" -ErrorAction SilentlyContinue
+        Set-Service   "Apache24" -StartupType Automatic -ErrorAction SilentlyContinue
+        Write-Ok "Servicio Apache24 iniciado."
+    }
+
+    Write-Section "Apache listo"
+    Write-Host "  URL     : http://localhost:$Puerto" -ForegroundColor Green
+    Write-Host "  Webroot : $webroot"                 -ForegroundColor Green
 }
 
-function Configure-Apache {
-    param(
-        [int]$Puerto,
-        [string]$Version = 'installed'
-    )
+function Set-ApacheSecurity {
+    param([string]$ConfFile)
 
-    $conf = Get-ApacheConfPath
-    $root = Get-ApacheInstallRoot
-    $prev = Get-ServiceConfiguredPort -Servicio 'Apache'
+    $bloque = @"
 
-    if (-not (Test-Path $conf)) {
-        throw "No se encontro httpd.conf en $conf"
-    }
+# ===== Seguridad Practica 6 =====
+ServerTokens Prod
+ServerSignature Off
+TraceEnable Off
 
-    $content = Get-Content $conf -Raw
-    $content = [regex]::Replace($content, '(?m)^Listen\s+\S+', "Listen $Puerto")
-
-    if ($content -match '(?m)^#?ServerName\s+.*') {
-        $content = [regex]::Replace($content, '(?m)^#?ServerName\s+.*', "ServerName localhost:$Puerto")
-    } else {
-        $content += "`r`nServerName localhost:$Puerto`r`n"
-    }
-
-    if ($content -notmatch '(?m)^LoadModule headers_module') {
-        $content = $content -replace '(?m)^#\s*LoadModule headers_module modules/mod_headers\.so', 'LoadModule headers_module modules/mod_headers.so'
-        if ($content -notmatch '(?m)^LoadModule headers_module') {
-            $content += "`r`nLoadModule headers_module modules/mod_headers.so`r`n"
-        }
-    }
-
-    if ($content -notmatch '(?m)^ServerTokens\s+Prod') {
-        $content += "`r`nServerTokens Prod`r`nServerSignature Off`r`nTraceEnable Off`r`n"
-    }
-
-    if ($content -notmatch 'Header always set X-Frame-Options') {
-        $content += @"
-
-<IfModule headers_module>
+<IfModule mod_headers.c>
     Header always set X-Frame-Options "SAMEORIGIN"
     Header always set X-Content-Type-Options "nosniff"
     Header always set X-XSS-Protection "1; mode=block"
+    Header always unset Server
 </IfModule>
-<LimitExcept GET POST HEAD>
-    Require all denied
-</LimitExcept>
+
+<Location />
+    <LimitExcept GET POST HEAD OPTIONS>
+        Require all denied
+    </LimitExcept>
+</Location>
 "@
-    }
-
-    Set-Content -Path $conf -Value $content -Encoding UTF8
-
-    $webroot = Get-ApacheWebRoot
-    Set-WebRootPermissions -Webroot $webroot -Identity 'Users'
-    New-IndexPage -Servicio 'Apache' -Version $Version -Puerto $Puerto -Webroot $webroot
-
-    $svcName = Ensure-ApacheService
-    $exe = Get-ApacheExePath
-
-    if (Test-Path $exe) {
-        & $exe -t | Out-Null
-    }
-
-    try {
-        Restart-Service -Name $svcName -Force -ErrorAction Stop
-    } catch {
-        Start-Service -Name $svcName -ErrorAction SilentlyContinue
-    }
-
-    Set-FirewallRule -Puerto $Puerto -Servicio 'Apache' -PuertoAnterior $(if ($prev) { $prev } else { 0 })
-
-    $ready = Test-ServiceReady -Servicio 'Apache' -Puerto $Puerto -TimeoutSeconds 25
-    if (-not $ready.Listener) {
-        throw "Apache no quedo escuchando en el puerto $Puerto."
-    }
-    if (-not $ready.Http.Success) {
-        throw "Apache abrio el puerto $Puerto, pero no respondio HTTP correctamente en localhost."
-    }
-
-    Write-Ok "Apache escuchando y respondiendo en puerto $Puerto."
-    Show-AccessInfo -Servicio 'Apache' -Puerto $Puerto -Webroot $webroot
+    Add-Content -Path $ConfFile -Value $bloque
+    Write-Ok "Seguridad Apache aplicada (ServerTokens Prod, headers, metodos restringidos)."
 }
 
-# ---------------------------------------------------------------------------
-# NGINX
-# ---------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# NGINX WINDOWS
+# ------------------------------------------------------------------------------
 
-function Get-NssmPath {
-    foreach ($p in $script:NSSM_PATHS) {
-        if (Test-Path $p) { return $p }
+function Install-NginxWindows {
+    param([int]$Puerto, [string]$Version = "latest")
+
+    Write-Section "Instalando Nginx para Windows"
+
+    $pkgId = if ($script:PKG_MANAGER -eq "winget") { "Nginx.Nginx" } else { "nginx" }
+    Write-Info "Instalando Nginx $Version via $script:PKG_MANAGER..."
+    Install-Package -Paquete $pkgId -Version $Version
+
+    $nginxDir = @(
+        "C:\tools\nginx",
+        "C:\nginx",
+        "$env:ProgramFiles\nginx",
+        "$env:ProgramData\chocolatey\lib\nginx\tools\nginx"
+    ) | Where-Object { Test-Path "$_\nginx.exe" } | Select-Object -First 1
+
+    if (-not $nginxDir) {
+        $hit = Get-ChildItem "C:\ProgramData\chocolatey\lib" -Recurse -Filter "nginx.exe" -ErrorAction SilentlyContinue |
+               Select-Object -First 1
+        if ($hit) { $nginxDir = $hit.DirectoryName }
     }
-    return $null
-}
 
-function Ensure-NginxInstalled {
-    param([string]$Version = 'latest')
-
-    if (Test-Path "$($script:NGINX_ROOT)\nginx.exe") {
+    if (-not $nginxDir) {
+        Write-Err "No se encontro directorio de Nginx tras la instalacion."
         return
     }
+    Write-Ok "Nginx encontrado en: $nginxDir"
 
-    Write-Section 'Instalando Nginx'
+    $confFile = "$nginxDir\conf\nginx.conf"
+    $webroot  = "$nginxDir\html"
 
-    if (Get-Command choco -ErrorAction SilentlyContinue) {
-        if ($Version -and $Version -ne 'latest' -and $Version -ne 'stable') {
-            choco install nginx --version $Version -y --no-progress --allow-downgrade
-        } else {
-            choco install nginx -y --no-progress
-        }
-        Start-Sleep -Seconds 3
-
-        if (Test-Path 'C:\tools\nginx\nginx.exe' -and -not (Test-Path "$($script:NGINX_ROOT)\nginx.exe")) {
-            if (Test-Path $script:NGINX_ROOT) {
-                Remove-Item $script:NGINX_ROOT -Recurse -Force -ErrorAction SilentlyContinue
-            }
-            Copy-Item 'C:\tools\nginx' $script:NGINX_ROOT -Recurse -Force
-        }
-    }
-
-    if (-not (Test-Path "$($script:NGINX_ROOT)\nginx.exe")) {
-        $zip = 'C:\nginx.zip'
-        $url = 'https://nginx.org/download/nginx-1.26.3.zip'
-        if (-not (Test-Path $zip)) {
-            Invoke-WebRequest -Uri $url -OutFile $zip
-        }
-        Expand-Archive -Path $zip -DestinationPath 'C:\' -Force
-        $src = Get-ChildItem 'C:\' -Directory | Where-Object { $_.Name -like 'nginx-*' } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-        if ($src) {
-            if (Test-Path $script:NGINX_ROOT) {
-                Remove-Item $script:NGINX_ROOT -Recurse -Force -ErrorAction SilentlyContinue
-            }
-            Move-Item $src.FullName $script:NGINX_ROOT -Force
-        }
-    }
-
-    if (-not (Test-Path "$($script:NGINX_ROOT)\nginx.exe")) {
-        throw 'No se pudo instalar Nginx.'
-    }
-}
-
-function Ensure-NginxService {
-    $svc = Get-Service -Name $script:NGINX_SVC -ErrorAction SilentlyContinue
-    if ($svc) {
-        return
-    }
-
-    $nssm = Get-NssmPath
-    if (-not $nssm -and (Get-Command choco -ErrorAction SilentlyContinue)) {
-        choco install nssm -y --no-progress
-        $nssm = Get-NssmPath
-    }
-
-    if (-not $nssm) {
-        throw 'No se encontro NSSM para registrar el servicio de Nginx.'
-    }
-
-    & $nssm install $script:NGINX_SVC "$($script:NGINX_ROOT)\nginx.exe" | Out-Null
-    & $nssm set $script:NGINX_SVC AppDirectory $script:NGINX_ROOT | Out-Null
-    & $nssm set $script:NGINX_SVC AppParameters '-p C:\nginx -c conf\nginx.conf' | Out-Null
-    & $nssm set $script:NGINX_SVC Start SERVICE_AUTO_START | Out-Null
-    Write-Ok 'Servicio Nginx registrado con NSSM.'
-}
-
-function Set-NginxConfig {
-    param([int]$Puerto)
-
-    if (-not (Test-Path (Join-Path $script:NGINX_ROOT 'conf'))) {
-        New-Item -ItemType Directory -Path (Join-Path $script:NGINX_ROOT 'conf') -Force | Out-Null
-    }
-
-    if (-not (Test-Path $script:NGINX_HTML)) {
-        New-Item -ItemType Directory -Path $script:NGINX_HTML -Force | Out-Null
-    }
-
-    $template = @'
+    $nginxConf = @"
 worker_processes  1;
-
-events {
-    worker_connections  1024;
-}
+events { worker_connections 1024; }
 
 http {
     include       mime.types;
     default_type  application/octet-stream;
-    server_tokens off;
     sendfile      on;
-    keepalive_timeout  65;
+    keepalive_timeout 65;
+
+    server_tokens off;
 
     server {
-        listen       __PORT__;
+        listen       $Puerto;
         server_name  localhost;
-        root         C:/nginx/html;
+        root         html;
         index        index.html;
 
-        add_header X-Frame-Options "SAMEORIGIN" always;
-        add_header X-Content-Type-Options "nosniff" always;
-        add_header X-XSS-Protection "1; mode=block" always;
+        add_header X-Frame-Options        "SAMEORIGIN"    always;
+        add_header X-Content-Type-Options "nosniff"       always;
+        add_header X-XSS-Protection       "1; mode=block" always;
 
-        if ($request_method ~* "^(TRACE|TRACK|DELETE)$") {
+        if ($request_method !~ ^(GET|POST|HEAD|OPTIONS)$) {
             return 405;
         }
 
-        location / {
-            try_files $uri $uri/ =404;
-        }
+        location / { try_files `$uri `$uri/ =404; }
+        location ~ /\. { deny all; }
     }
 }
-'@
+"@
+    Set-Content -Path $confFile -Value $nginxConf -Encoding UTF8
+    Write-Ok "nginx.conf generado con puerto $Puerto."
 
-    $conf = $template.Replace('__PORT__', [string]$Puerto)
-    Set-Content -Path $script:NGINX_CONF -Value $conf -Encoding UTF8
+    Set-WebRootPermissions -Webroot $webroot -ServiceUser "NETWORK SERVICE"
+
+    $verInstalada = Get-InstalledVersion -Servicio "nginx"
+    New-IndexPage        -Servicio "Nginx" -Version $verInstalada -Puerto $Puerto -Webroot $webroot
+    Set-FirewallRule     -Puerto $Puerto -PuertoAnterior 80 -Servicio "Nginx"
+    Register-NginxService -NginxDir $nginxDir
+
+    Write-Section "Nginx listo"
+    Write-Host "  URL     : http://localhost:$Puerto" -ForegroundColor Green
+    Write-Host "  Webroot : $webroot"                 -ForegroundColor Green
 }
 
-function Restart-NginxManaged {
-    param(
-        [int]$Puerto,
-        [int]$PuertoAnterior = 0
-    )
+function Register-NginxService {
+    param([string]$NginxDir)
 
-    $exe = Join-Path $script:NGINX_ROOT 'nginx.exe'
-    if (-not (Test-Path $exe)) {
-        throw "No se encontro nginx.exe en $exe"
+    if (-not (Get-Command nssm -ErrorAction SilentlyContinue)) {
+        Write-Info "Instalando NSSM para gestionar Nginx como servicio..."
+        Install-Package -Paquete "nssm" -Version "latest"
+        $env:PATH += ";$env:ChocolateyInstall\bin"
     }
 
-    & $exe -t -p $script:NGINX_ROOT -c 'conf\nginx.conf' | Out-Null
-
-    Get-Process nginx -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-    Ensure-NginxService
-
-    try {
-        Restart-Service -Name $script:NGINX_SVC -Force -ErrorAction Stop
-    } catch {
-        Start-Service -Name $script:NGINX_SVC -ErrorAction SilentlyContinue
-    }
-
-    $ready = Test-ServiceReady -Servicio 'Nginx' -Puerto $Puerto -TimeoutSeconds 20
-    if (-not $ready.Listener) {
-        & $exe -p $script:NGINX_ROOT -c 'conf\nginx.conf' | Out-Null
-        $ready = Test-ServiceReady -Servicio 'Nginx' -Puerto $Puerto -TimeoutSeconds 20
-    }
-
-    Set-FirewallRule -Puerto $Puerto -Servicio 'Nginx' -PuertoAnterior $PuertoAnterior
-
-    if (-not $ready.Listener) {
-        throw "Nginx no quedo escuchando en el puerto $Puerto."
-    }
-    if (-not $ready.Http.Success) {
-        throw "Nginx abrio el puerto $Puerto, pero no respondio HTTP correctamente en localhost."
-    }
-
-    Write-Ok "Nginx escuchando y respondiendo en puerto $Puerto."
-}
-
-function Install-NginxWindows {
-    param(
-        [string]$Version = 'latest',
-        [int]$Puerto
-    )
-
-    $prev = Get-ServiceConfiguredPort -Servicio 'Nginx'
-    Ensure-NginxInstalled -Version $Version
-    Set-NginxConfig -Puerto $Puerto
-    Set-WebRootPermissions -Webroot $script:NGINX_HTML -Identity 'Users'
-    New-IndexPage -Servicio 'Nginx' -Version $Version -Puerto $Puerto -Webroot $script:NGINX_HTML
-    Restart-NginxManaged -Puerto $Puerto -PuertoAnterior $(if ($prev) { $prev } else { 0 })
-    Show-AccessInfo -Servicio 'Nginx' -Puerto $Puerto -Webroot $script:NGINX_HTML
-}
-
-# ---------------------------------------------------------------------------
-# GESTION / LOGS / HEADERS
-# ---------------------------------------------------------------------------
-
-function Invoke-ServiceAction {
-    param(
-        [ValidateSet('IIS','Apache','Nginx')][string]$Servicio,
-        [ValidateSet('Start','Stop','Restart')][string]$Action
-    )
-
-    switch ($Servicio) {
-        'IIS' {
-            Import-IISModules
-            switch ($Action) {
-                'Start' {
-                    Restart-IISStack
-                    try { Start-WebAppPool -Name $script:IIS_APPPOOL -ErrorAction SilentlyContinue } catch {}
-                    Start-Website -Name $script:IIS_SITE -ErrorAction SilentlyContinue
-                }
-                'Stop' {
-                    Stop-Website -Name $script:IIS_SITE -ErrorAction SilentlyContinue
-                    Stop-Service W3SVC -ErrorAction SilentlyContinue
-                }
-                'Restart' {
-                    try { & iisreset /restart | Out-Null } catch {}
-                }
-            }
-        }
-
-        'Apache' {
-            $svcName = Ensure-ApacheService
-            switch ($Action) {
-                'Start'   { Start-Service -Name $svcName -ErrorAction SilentlyContinue }
-                'Stop'    { Stop-Service -Name $svcName -Force -ErrorAction SilentlyContinue }
-                'Restart' { Restart-Service -Name $svcName -Force -ErrorAction SilentlyContinue }
-            }
-        }
-
-        'Nginx' {
-            Ensure-NginxService
-            switch ($Action) {
-                'Start' {
-                    Start-Service -Name $script:NGINX_SVC -ErrorAction SilentlyContinue
-                }
-                'Stop' {
-                    Stop-Service -Name $script:NGINX_SVC -Force -ErrorAction SilentlyContinue
-                    Get-Process nginx -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-                }
-                'Restart' {
-                    Stop-Service -Name $script:NGINX_SVC -Force -ErrorAction SilentlyContinue
-                    Get-Process nginx -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-                    Start-Service -Name $script:NGINX_SVC -ErrorAction SilentlyContinue
-                }
-            }
-        }
-    }
-}
-
-function Show-ServiceLogs {
-    param([ValidateSet('IIS','Apache','Nginx')][string]$Servicio)
-
-    Write-Section "Logs recientes: $Servicio"
-
-    switch ($Servicio) {
-        'IIS' {
-            $file = Get-ChildItem 'C:\inetpub\logs\LogFiles' -Recurse -File -ErrorAction SilentlyContinue |
-                Sort-Object LastWriteTime -Descending |
-                Select-Object -First 1
-            if ($file) {
-                Get-Content $file.FullName -Tail 20
-            } else {
-                Write-Warn 'No se encontraron logs IIS.'
-            }
-        }
-
-        'Apache' {
-            $root = Get-ApacheInstallRoot
-            $file = Get-ChildItem (Join-Path $root 'logs') -File -ErrorAction SilentlyContinue |
-                Sort-Object LastWriteTime -Descending |
-                Select-Object -First 1
-            if ($file) {
-                Get-Content $file.FullName -Tail 20
-            } else {
-                Write-Warn 'No se encontraron logs Apache.'
-            }
-        }
-
-        'Nginx' {
-            $file = Get-ChildItem (Join-Path $script:NGINX_ROOT 'logs') -File -ErrorAction SilentlyContinue |
-                Sort-Object LastWriteTime -Descending |
-                Select-Object -First 1
-            if ($file) {
-                Get-Content $file.FullName -Tail 20
-            } else {
-                Write-Warn 'No se encontraron logs Nginx.'
-            }
-        }
-    }
-}
-
-function Test-HttpHeaders {
-    param([ValidateSet('IIS','Apache','Nginx')][string]$Servicio)
-
-    $port = Get-ServiceConfiguredPort -Servicio $Servicio
-    if (-not $port) {
-        Write-Warn "No se detecto puerto configurado para $Servicio."
-        return
-    }
-
-    Write-Section "curl -I para $Servicio"
-    & curl.exe -I "http://127.0.0.1:$port"
-}
-
-function Stop-ListeningServiceByPort {
-    param([int]$Puerto)
-
-    $conn = Get-NetTCPConnection -State Listen -LocalPort $Puerto -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $conn) {
-        Write-Warn "No hay listener en puerto $Puerto."
-        return
-    }
-
-    $pid = $conn.OwningProcess
-    if ($pid -eq 4) {
-        $iisPort = (Get-IISRealStatus).ConfiguredPort
-        if ($iisPort -eq $Puerto) {
-            try {
-                Stop-Website -Name $script:IIS_SITE -ErrorAction SilentlyContinue
-            } catch {}
-            try {
-                Stop-Service W3SVC -ErrorAction SilentlyContinue
-            } catch {}
-            Write-Ok "IIS detenido para liberar puerto $Puerto."
-            return
-        }
-
-        Write-Warn 'El PID 4 corresponde a System/HTTP.sys. No se liberara a la fuerza.'
-        return
-    }
-
-    try {
-        $proc = Get-Process -Id $pid -ErrorAction Stop
-        Stop-Process -Id $pid -Force
-        Write-Ok "Proceso $($proc.ProcessName) detenido para liberar puerto $Puerto."
-    } catch {
-        Write-Warn "No se pudo detener el PID $pid."
+    $nginxExe = "$NginxDir\nginx.exe"
+    if (Get-Command nssm -ErrorAction SilentlyContinue) {
+        nssm stop    "Nginx" 2>$null | Out-Null
+        nssm remove  "Nginx" confirm 2>$null | Out-Null
+        nssm install "Nginx" $nginxExe 2>&1 | Out-Null
+        nssm set     "Nginx" AppDirectory $NginxDir 2>&1 | Out-Null
+        nssm set     "Nginx" Start SERVICE_AUTO_START 2>&1 | Out-Null
+        Start-Service "Nginx" -ErrorAction SilentlyContinue
+        Write-Ok "Nginx registrado como servicio Windows (NSSM) e iniciado."
+    } else {
+        Write-Warn "NSSM no disponible. Iniciando Nginx directamente..."
+        Start-Process $nginxExe -WorkingDirectory $NginxDir -WindowStyle Hidden
+        Write-Ok "Nginx iniciado en segundo plano."
     }
 }
