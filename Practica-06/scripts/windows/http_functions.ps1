@@ -359,7 +359,7 @@ function Select-Version {
 
     $versions = Get-AvailableVersions -Paquete $Paquete
     Write-Host ''
-    Write-Host "Versiones disponibles para $Paquete:" -ForegroundColor White
+    Write-Host "Versiones disponibles para ${Paquete}:" -ForegroundColor White
 
     for ($i = 0; $i -lt $versions.Count; $i++) {
         $tag = ''
@@ -673,7 +673,7 @@ function Set-WebRootPermissions {
 
     try {
         & icacls $Webroot /inheritance:e | Out-Null
-        & icacls $Webroot /grant:r "$Identity:(OI)(CI)(RX)" | Out-Null
+        & icacls $Webroot /grant:r "${Identity}:(OI)(CI)(RX)" | Out-Null
         Write-Ok "Permisos NTFS aplicados: $Identity lectura/ejecucion en $Webroot"
     } catch {
         Write-Warn "No se pudieron ajustar permisos NTFS: $($_.Exception.Message)"
