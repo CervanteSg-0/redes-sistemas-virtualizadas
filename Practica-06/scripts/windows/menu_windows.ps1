@@ -12,6 +12,14 @@ if (-not (Test-Path $FunctionsFile)) {
 }
 
 . $FunctionsFile
+
+if (-not (Get-Command Write-Err -ErrorAction SilentlyContinue)) {
+    function Write-Err {
+        param([string]$Text)
+        Write-Host "[ERR]  $Text" -ForegroundColor Red
+    }
+}
+
 Assert-Admin
 
 function Show-ServiceStatus {
@@ -225,7 +233,7 @@ while ($true) {
             default { Write-Warn 'Opcion invalida.' }
         }
     } catch {
-        Write-Err $_.Exception.Message
+        Write-Host "[ERR]  $($_.Exception.Message)" -ForegroundColor Red
     }
 
     Write-Host ''
