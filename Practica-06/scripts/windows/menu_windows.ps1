@@ -65,24 +65,34 @@ function Get-ServicePort {
         "W3SVC" {
             try {
                 Import-Module WebAdministration -ErrorAction SilentlyContinue
-                $b = Get-WebBinding -Name "Default Web Site" -Protocol http -ErrorAction SilentlyContinue |
-                     Select-Object -First 1
-                if ($b) { return ($b.bindingInformation -split ':')[1] }
+                $bindings = Get-WebBinding -Name "Default Web Site" -Protocol http -ErrorAction SilentlyContinue
+                if ($bindings) { 
+                    return ($bindings[0].bindingInformation -split ':')[1]
+                }
             } catch {}
-            return "?"
+            return "80"
         }
         { $_ -eq $script:APACHE_SVC } {
-            if (Test-Path $script:APACHE_CONF) {
-                $linea = Get-Content $script:APACHE_CONF | Where-Object { $_ -match '^Listen \d+' } | Select-Object -First 1
-                if ($linea) { return ($linea -split ' ')[1] }
+            $conf = if (Test-Path $script:APACHE_CONF) { $script:APACHE_CONF } else { 
+                # Buscar dinamicamente si la ruta no coincide
+                @(
+                    "C:\Apache24\conf\httpd.conf",
+                    "C:\tools\Apache24\conf\httpd.conf",
+                    "$env:ProgramFiles\Apache24\conf\httpd.conf",
+                    "$env:ProgramData\chocolatey\lib\apache-httpd\tools\Apache24\conf\httpd.conf",
+                    "$env:APPDATA\Apache24\conf\httpd.conf"
+                ) | Where-Object { Test-Path $_ } | Select-Object -First 1
             }
+            if ($null -eq $conf) { return "?" }
+            $linea = Get-Content $conf | Where-Object { $_ -match '^\s*Listen\s+\d+' } | Select-Object -First 1
+            if ($linea -match 'Listen\s+(\d+)') { return $matches[1] }
             return "?"
         }
         { $_ -eq $script:NGINX_SVC } {
-            if (Test-Path $script:NGINX_CONF) {
-                $linea = Get-Content $script:NGINX_CONF | Where-Object { $_ -match 'listen\s+\d+' } | Select-Object -First 1
-                if ($linea -match 'listen\s+(\d+)') { return $matches[1] }
-            }
+            $conf = if (Test-Path $script:NGINX_CONF) { $script:NGINX_CONF } else { "C:\nginx\conf\nginx.conf" }
+            if (-not (Test-Path $conf)) { return "?" }
+            $linea = Get-Content $conf | Where-Object { $_ -match 'listen\s+\d+' } | Select-Object -First 1
+            if ($linea -match 'listen\s+(\d+)') { return $matches[1] }
             return "?"
         }
         default { return "?" }
@@ -267,23 +277,35 @@ function Show-PortsStatus {
     $nginxPuerto  = Get-ServicePort -Servicio $script:NGINX_SVC
     $iisPuerto    = Get-ServicePort -Servicio "W3SVC"
 
-    Write-Host "  Configuracion en archivos:" -ForegroundColor Cyan
+    Write-Host "  Configuracion detectada en archivos:" -ForegroundColor Cyan
     Write-Host "   IIS    : puerto $iisPuerto"    -ForegroundColor White
     Write-Host "   Apache : puerto $apachePuerto" -ForegroundColor White
     Write-Host "   Nginx  : puerto $nginxPuerto"  -ForegroundColor White
     Write-Host ""
 
     # Puertos realmente en escucha en el sistema
-    Write-Host "  Puertos en escucha (red):" -ForegroundColor Cyan
+    Write-Host "  Puertos en escucha reales (Network Stack):" -ForegroundColor Cyan
+    Write-Host "  --------------------------------------------------" -ForegroundColor Gray
+
+    $puertosInteres = @(80, 443, 8080, 8081, 9091)
+    if ($iisPuerto    -match '^\d+$') { $puertosInteres += [int]$iisPuerto }
+    if ($apachePuerto -match '^\d+$') { $puertosInteres += [int]$apachePuerto }
+    if ($nginxPuerto  -match '^\d+$') { $puertosInteres += [int]$nginxPuerto }
+    $puertosInteres = $puertosInteres | Select-Object -Unique
+
     Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
         Select-Object LocalPort, OwningProcess |
         ForEach-Object {
             $proc = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue
-            [PSCustomObject]@{ Puerto=$_.LocalPort; PID=$_.OwningProcess; Proceso=$proc.Name }
+            [PSCustomObject]@{ 
+                Puerto  = $_.LocalPort
+                PID     = $_.OwningProcess
+                Proceso = if ($proc) { $proc.Name } else { "System/Unknown" }
+            }
         } |
-        Where-Object { $_.Puerto -in @(80,443,999,8080,8081,8082,8083,8084,8085,8086,8087,8088,8888,9090,$apachePuerto,$nginxPuerto,$iisPuerto) } |
-        Sort-Object Puerto -Unique |
-        Format-Table -AutoSize
+        Where-Object { $_.Puerto -in $puertosInteres } |
+        Sort-Object Puerto |
+        Format-Table -Property Puerto, PID, Proceso -AutoSize
 }
 
 # ------------------------------------------------------------------------------

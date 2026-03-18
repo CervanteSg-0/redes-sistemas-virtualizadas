@@ -477,6 +477,11 @@ function Install-ApacheWindows {
 
     Write-Section "Instalando Apache HTTP Server (Windows)"
 
+    # Detener procesos existentes para liberar puertos
+    Write-Info "Deteniendo servicios y procesos de Apache previos..."
+    Stop-Service "Apache24" -Force -ErrorAction SilentlyContinue 2>$null
+    Get-Process httpd -ErrorAction SilentlyContinue | Stop-Process -Force 2>$null
+
     $pkgId = if ($script:PKG_MANAGER -eq "winget") { "Apache.Httpd" } else { "apache-httpd" }
     Write-Info "Instalando Apache $Version via $script:PKG_MANAGER..."
     Install-Package -Paquete $pkgId -Version $Version
@@ -496,7 +501,7 @@ function Install-ApacheWindows {
 
     # Fallback: buscar httpd.exe en todo el sistema
     if (-not $apacheDir) {
-        $hit = Get-ChildItem "$env:APPDATA", "$env:ProgramFiles", "$env:ProgramData", "C:\" `
+        $hit = Get-ChildItem "C:\ProgramData\chocolatey\lib", "C:\tools" `
                -Recurse -Filter "httpd.exe" -ErrorAction SilentlyContinue |
                Select-Object -First 1
         if ($hit) {
@@ -506,8 +511,7 @@ function Install-ApacheWindows {
     }
 
     if (-not $apacheDir) {
-        Write-Err "No se encontro httpd.exe. Ejecuta manualmente:"
-        Write-Host "  Get-ChildItem \$env:APPDATA -Recurse -Filter httpd.exe" -ForegroundColor Gray
+        Write-Err "No se encontro httpd.exe. Reinstalacion recomendada."
         return
     }
     Write-Ok "Apache encontrado en: $apacheDir"
@@ -515,11 +519,19 @@ function Install-ApacheWindows {
     $confFile = "$apacheDir\conf\httpd.conf"
     $webroot  = "$apacheDir\htdocs"
 
-    (Get-Content $confFile) `
-        -replace '^Listen \d+',    "Listen $Puerto" `
-        -replace '^ServerName .*', "ServerName localhost:$Puerto" |
-        Set-Content $confFile
-    Write-Ok "Puerto $Puerto aplicado en httpd.conf."
+    if (Test-Path $confFile) {
+        $conf = Get-Content $confFile
+        # Habilitar mod_headers y otros si estan comentados
+        $conf = $conf -replace '#LoadModule headers_module', 'LoadModule headers_module'
+        $conf = $conf -replace '#LoadModule rewrite_module', 'LoadModule rewrite_module'
+        
+        # Aplicar puerto
+        $conf = $conf -replace '^Listen \d+',    "Listen $Puerto"
+        $conf = $conf -replace '^ServerName .*', "ServerName localhost:$Puerto"
+        
+        Set-Content $confFile $conf
+        Write-Ok "Configuracion basica y puerto $Puerto aplicados."
+    }
 
     Set-ApacheSecurity     -ConfFile $confFile
     Set-WebRootPermissions -Webroot $webroot -ServiceUser "NETWORK SERVICE"
@@ -530,10 +542,21 @@ function Install-ApacheWindows {
 
     $httpd = "$apacheDir\bin\httpd.exe"
     if (Test-Path $httpd) {
+        Write-Info "Registrando e iniciando servicio Apache24..."
+        # Intentar instalar servicio si no existe
         & $httpd -k install -n "Apache24" 2>&1 | Out-Null
+        
+        # Iniciar servicio
         Start-Service "Apache24" -ErrorAction SilentlyContinue
         Set-Service   "Apache24" -StartupType Automatic -ErrorAction SilentlyContinue
-        Write-Ok "Servicio Apache24 iniciado."
+        
+        # Verificar si inicio correctamente
+        $proceso = Get-Process httpd -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($proceso) {
+            Write-Ok "Servicio Apache24 activo con PID: $($proceso.Id)."
+        } else {
+            Write-Warn "Apache no parece estar corriendo. Revisa logs en $apacheDir\logs\error.log"
+        }
     }
 
     Write-Section "Apache listo"
@@ -543,6 +566,14 @@ function Install-ApacheWindows {
 
 function Set-ApacheSecurity {
     param([string]$ConfFile)
+
+    if (-not (Test-Path $ConfFile)) { return }
+    $content = Get-Content $ConfFile -Raw
+    
+    if ($content -match "# ===== Seguridad Practica 6 =====") {
+        Write-Ok "Seguridad Apache ya estaba aplicada."
+        return
+    }
 
     $bloque = @"
 
@@ -575,7 +606,9 @@ TraceEnable Off
 function Install-NginxWindows {
     param([int]$Puerto, [string]$Version = "latest")
 
-    Write-Section "Instalando Nginx para Windows"
+    Write-Info "Deteniendo procesos previos de Nginx..."
+    Stop-Service "Nginx" -Force -ErrorAction SilentlyContinue 2>$null
+    Get-Process nginx -ErrorAction SilentlyContinue | Stop-Process -Force 2>$null
 
     $pkgId = if ($script:PKG_MANAGER -eq "winget") { "Nginx.Nginx" } else { "nginx" }
     Write-Info "Instalando Nginx $Version via $script:PKG_MANAGER..."
