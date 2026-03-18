@@ -1,11 +1,11 @@
 # ==============================================================================
 # menu_windows_corregido_final.ps1
 # Practica 6 - Windows Server 2022 - Aprovisionamiento HTTP
-# Main script: solo llamadas a funciones de http_functions_corregido_final.ps1
+#.ps1
 # ==============================================================================
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$FunctionsFile = Join-Path $ScriptDir 'http_functions_corregido_final.ps1'
+$FunctionsFile = Join-Path $ScriptDir 'http_functions.ps1'
 if (-not (Test-Path $FunctionsFile)) {
     Write-Host "ERROR: No se encontro el archivo de funciones: $FunctionsFile" -ForegroundColor Red
     exit 1

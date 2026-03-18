@@ -1,7 +1,7 @@
 # ==============================================================================
 # http_functions_corregido_final.ps1
 # Practica 6 - Windows Server 2022 - Aprovisionamiento HTTP
-# Libreria de funciones para menu_windows_corregido_final.ps1
+# Libreria de funciones para menu_windows.ps1
 # ==============================================================================
 
 Set-StrictMode -Version 2
