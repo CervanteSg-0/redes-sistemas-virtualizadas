@@ -27,7 +27,7 @@ function Import-FunctionsLibrary {
             throw 'El archivo de funciones esta vacio.'
         }
 
-        . ([scriptblock]::Create($raw))
+        . $Path
     } catch {
         throw "No se pudo cargar la biblioteca de funciones '$Path'. Detalle: $($_.Exception.Message)"
     }
