@@ -1,17 +1,36 @@
-# ==============================================================================
-# menu_windows_corregido_final.ps1
+# ============================================================================
+# menu_windows.ps1
 # Practica 6 - Windows Server 2022 - Aprovisionamiento HTTP
-#.ps1
-# ==============================================================================
+# ============================================================================
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $FunctionsFile = Join-Path $ScriptDir 'http_functions.ps1'
+
 if (-not (Test-Path $FunctionsFile)) {
     Write-Host "ERROR: No se encontro el archivo de funciones: $FunctionsFile" -ForegroundColor Red
     exit 1
 }
+
 . $FunctionsFile
 Assert-Admin
+
+function Show-ServiceStatus {
+    Write-Host '  Estado actual de servicios:' -ForegroundColor White
+
+    foreach ($svc in @('IIS','Apache','Nginx')) {
+        $st = Get-ServiceStateSummary -Servicio $svc
+        if ($st.Running) {
+            Write-Host ("    [+] {0,-7} activo   puerto real: {1}" -f $svc, $st.RealPort) -ForegroundColor Green
+        } elseif ($st.ConfiguredPort) {
+            Write-Host ("    [-] {0,-7} inactivo/configurado puerto: {1}" -f $svc, $st.ConfiguredPort) -ForegroundColor Yellow
+            if ($st.Detail) {
+                Write-Host ("        {0}" -f $st.Detail) -ForegroundColor DarkYellow
+            }
+        } else {
+            Write-Host ("    [-] {0,-7} no instalado / sin config" -f $svc) -ForegroundColor Red
+        }
+    }
+}
 
 function Show-Header {
     Clear-Host
@@ -25,39 +44,24 @@ function Show-Header {
     Write-Host ''
 }
 
-function Show-ServiceStatus {
-    Write-Host '  Estado actual de servicios:' -ForegroundColor White
-    foreach ($svc in 'IIS','Apache','Nginx') {
-        $st = Get-ServiceStateSummary -Servicio $svc
-        if ($st.Running) {
-            Write-Host ("    [+] {0,-7} activo   puerto real: {1}" -f $svc, $st.RealPort) -ForegroundColor Green
-        } elseif ($st.ConfiguredPort) {
-            Write-Host ("    [-] {0,-7} inactivo/configurado puerto: {1}" -f $svc, $st.ConfiguredPort) -ForegroundColor Yellow
-            if ($st.Detail) { Write-Host ("        {0}" -f $st.Detail) -ForegroundColor DarkYellow }
-        } else {
-            Write-Host ("    [-] {0,-7} no instalado / sin config" -f $svc) -ForegroundColor Red
-        }
-    }
-}
-
 function Show-MainMenu {
     Show-Header
     Write-Host '  ============  MENU PRINCIPAL  ============' -ForegroundColor White
     Write-Host ''
     Write-Host '  -- Instalacion -----------------------------' -ForegroundColor Cyan
     Write-Host '   1)  Instalar IIS (Internet Information Services)' -ForegroundColor Green
-    Write-Host '   2)  Instalar Apache HTTP Server (Win64)'          -ForegroundColor Green
-    Write-Host '   3)  Instalar Nginx para Windows'                  -ForegroundColor Green
+    Write-Host '   2)  Instalar Apache HTTP Server (Win64)' -ForegroundColor Green
+    Write-Host '   3)  Instalar Nginx para Windows' -ForegroundColor Green
     Write-Host ''
     Write-Host '  -- Gestion de servicios --------------------' -ForegroundColor Cyan
-    Write-Host '   4)  Iniciar / Detener / Reiniciar servicio'       -ForegroundColor Green
-    Write-Host '   5)  Ver puertos activos de cada servicio'         -ForegroundColor Green
-    Write-Host '   6)  Ver logs recientes de un servicio'            -ForegroundColor Green
+    Write-Host '   4)  Iniciar / Detener / Reiniciar servicio' -ForegroundColor Green
+    Write-Host '   5)  Ver puertos activos de cada servicio' -ForegroundColor Green
+    Write-Host '   6)  Ver logs recientes de un servicio' -ForegroundColor Green
     Write-Host ''
     Write-Host '  -- Configuracion ---------------------------' -ForegroundColor Cyan
-    Write-Host '   7)  Cambiar puerto de un servicio instalado'      -ForegroundColor Green
-    Write-Host '   8)  Ver encabezados HTTP (curl -I)'               -ForegroundColor Green
-    Write-Host '   9)  Liberar un puerto en escucha'                 -ForegroundColor Green
+    Write-Host '   7)  Cambiar puerto de un servicio instalado' -ForegroundColor Green
+    Write-Host '   8)  Ver encabezados HTTP (curl -I)' -ForegroundColor Green
+    Write-Host '   9)  Liberar un puerto en escucha' -ForegroundColor Green
     Write-Host ''
     Write-Host '   0)  Salir' -ForegroundColor Red
     Write-Host ''
@@ -66,10 +70,12 @@ function Show-MainMenu {
 
 function Select-Service {
     param([string]$Prompt = 'Selecciona servicio')
+
     Write-Host ''
-    Write-Host '  1) IIS'    -ForegroundColor Green
+    Write-Host '  1) IIS' -ForegroundColor Green
     Write-Host '  2) Apache' -ForegroundColor Green
-    Write-Host '  3) Nginx'  -ForegroundColor Green
+    Write-Host '  3) Nginx' -ForegroundColor Green
+
     do {
         $sel = Read-Host "  $Prompt [1-3]"
         switch ($sel) {
@@ -83,9 +89,10 @@ function Select-Service {
 
 function Select-Action {
     Write-Host ''
-    Write-Host '  1) Iniciar'   -ForegroundColor Green
-    Write-Host '  2) Detener'   -ForegroundColor Green
+    Write-Host '  1) Iniciar' -ForegroundColor Green
+    Write-Host '  2) Detener' -ForegroundColor Green
     Write-Host '  3) Reiniciar' -ForegroundColor Green
+
     do {
         $sel = Read-Host '  Accion [1-3]'
         switch ($sel) {
@@ -100,21 +107,26 @@ function Select-Action {
 function Show-PortsPanel {
     Write-Section 'PUERTOS ACTIVOS POR SERVICIO'
     Write-Host 'Configuracion en archivos / bindings:' -ForegroundColor Cyan
-    foreach ($svc in 'IIS','Apache','Nginx') {
+
+    foreach ($svc in @('IIS','Apache','Nginx')) {
         $port = Get-ServiceConfiguredPort -Servicio $svc
-        Write-Host ("  {0,-7}: puerto {1}" -f $svc, $(if($port){$port}else{'?'})) -ForegroundColor White
+        Write-Host ("  {0,-7}: puerto {1}" -f $svc, $(if ($port) { $port } else { '?' })) -ForegroundColor White
     }
+
     Write-Host ''
     Write-Host 'Puertos en escucha (red):' -ForegroundColor Cyan
     $rows = Get-ListeningTable
+
     if (-not $rows -or $rows.Count -eq 0) {
         Write-Warn 'No se detectaron listeners para IIS/Apache/Nginx.'
-    } else {
-        '{0,-8} {1,-8} {2,-8} {3}' -f 'Servicio','Puerto','PID','Proceso' | Write-Host -ForegroundColor White
-        '{0,-8} {1,-8} {2,-8} {3}' -f '--------','------','---','-------' | Write-Host -ForegroundColor White
-        foreach ($r in $rows) {
-            '{0,-8} {1,-8} {2,-8} {3}' -f $r.Servicio,$r.Puerto,$r.PID,$r.Proceso | Write-Host
-        }
+        return
+    }
+
+    '{0,-8} {1,-8} {2,-8} {3}' -f 'Servicio','Puerto','PID','Proceso' | Write-Host -ForegroundColor White
+    '{0,-8} {1,-8} {2,-8} {3}' -f '--------','------','---','-------' | Write-Host -ForegroundColor White
+
+    foreach ($r in $rows) {
+        '{0,-8} {1,-8} {2,-8} {3}' -f $r.Servicio, $r.Puerto, $r.PID, $r.Proceso | Write-Host
     }
 }
 
@@ -128,14 +140,14 @@ function Flow-InstallIIS {
 function Flow-InstallApache {
     Write-Section 'Flujo de instalacion: Apache'
     $version = Select-Version -Paquete 'Apache'
-    $puerto  = Get-PortFromUser -Servicio 'Apache' -Default 8081
+    $puerto = Get-PortFromUser -Servicio 'Apache' -Default 8081
     Install-ApacheWindows -Version $version -Puerto $puerto
 }
 
 function Flow-InstallNginx {
     Write-Section 'Flujo de instalacion: Nginx'
     $version = Select-Version -Paquete 'Nginx'
-    $puerto  = Get-PortFromUser -Servicio 'Nginx' -Default 8082
+    $puerto = Get-PortFromUser -Servicio 'Nginx' -Default 8082
     Install-NginxWindows -Version $version -Puerto $puerto
 }
 
@@ -155,19 +167,23 @@ function Flow-Logs {
 function Flow-ChangePort {
     Write-Section 'Cambio de puerto'
     $svc = Select-Service -Prompt 'Servicio a reconfigurar'
+
     switch ($svc) {
         'IIS' {
-            $puerto = Get-PortFromUser -Servicio 'IIS' -Default $(if((Get-ServiceConfiguredPort -Servicio 'IIS')){Get-ServiceConfiguredPort -Servicio 'IIS'}else{8080})
+            $actual = Get-ServiceConfiguredPort -Servicio 'IIS'
+            $puerto = Get-PortFromUser -Servicio 'IIS' -Default $(if ($actual) { $actual } else { 8080 })
             Set-IISPort -Puerto $puerto
         }
         'Apache' {
-            $puerto = Get-PortFromUser -Servicio 'Apache' -Default $(if((Get-ServiceConfiguredPort -Servicio 'Apache')){Get-ServiceConfiguredPort -Servicio 'Apache'}else{8081})
+            $actual = Get-ServiceConfiguredPort -Servicio 'Apache'
+            $puerto = Get-PortFromUser -Servicio 'Apache' -Default $(if ($actual) { $actual } else { 8081 })
             Configure-Apache -Puerto $puerto
         }
         'Nginx' {
-            $puerto = Get-PortFromUser -Servicio 'Nginx' -Default $(if((Get-ServiceConfiguredPort -Servicio 'Nginx')){Get-ServiceConfiguredPort -Servicio 'Nginx'}else{8082})
+            $actual = Get-ServiceConfiguredPort -Servicio 'Nginx'
+            $puerto = Get-PortFromUser -Servicio 'Nginx' -Default $(if ($actual) { $actual } else { 8082 })
             Set-NginxConfig -Puerto $puerto
-            Restart-NginxManaged -Puerto $puerto
+            Restart-NginxManaged -Puerto $puerto -PuertoAnterior $(if ($actual) { $actual } else { 0 })
         }
     }
 }
@@ -182,19 +198,19 @@ function Flow-FreePort {
     do {
         $raw = Read-Host 'Puerto a liberar'
         $ok = $raw -match '^\d+$'
-        if (-not $ok) { Write-Warn 'Ingresa solo numeros.' }
+        if (-not $ok) {
+            Write-Warn 'Ingresa solo numeros.'
+        }
     } until ($ok)
+
     Stop-ListeningServiceByPort -Puerto ([int]$raw)
 }
-
-# ------------------------------------------------------------------------------
-# LOOP PRINCIPAL
-# ------------------------------------------------------------------------------
 
 while ($true) {
     try {
         Show-MainMenu
         $opt = Read-Host
+
         switch ($opt) {
             '1' { Flow-InstallIIS }
             '2' { Flow-InstallApache }
@@ -211,6 +227,7 @@ while ($true) {
     } catch {
         Write-Err $_.Exception.Message
     }
+
     Write-Host ''
     Read-Host 'Presiona ENTER para volver al menu' | Out-Null
 }
