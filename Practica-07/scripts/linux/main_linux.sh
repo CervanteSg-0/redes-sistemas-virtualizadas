@@ -223,7 +223,7 @@ while true; do
         3) run_service_flow "Tomcat" ;;
         4) 
             echo -e "\n${YELLOW}[INFO] Evaluando configuración de vsftpd...${NC}"
-            # Asegurar instalación y recarga de systemd (Crucial en Mageia)
+            # Asegurar instalación (Mageia/DNF)
             if ! rpm -q vsftpd &> /dev/null; then
                 echo -e "${CYAN}[*] Instalando vsftpd...${NC}"
                 $PKG_INSTALL vsftpd &> /dev/null
@@ -244,19 +244,21 @@ while true; do
                 echo "allow_anon_ssl=YES" | sudo tee -a $CONFIG > /dev/null
                 echo "force_local_data_ssl=YES" | sudo tee -a $CONFIG > /dev/null
                 
-                # Detectar nombre correcto del servicio (Mageia puede usar .service o .socket)
-                SVC_FTP="vsftpd.service"
-                if ! systemctl list-unit-files | grep -q "vsftpd.service"; then
-                    if systemctl list-unit-files | grep -q "vsftpd.socket"; then
-                        SVC_FTP="vsftpd.socket"
-                    fi
-                fi
-                
-                echo -e "${CYAN}[*] Reiniciando $SVC_FTP...${NC}"
+                # Búsqueda dinámica del servicio (Crucial para Mageia/Fedora)
                 sudo systemctl daemon-reload
+                SVC_FTP=$(systemctl list-unit-files | grep "vsftpd" | head -n 1 | awk '{print $1}')
+                [ -z "$SVC_FTP" ] && SVC_FTP="vsftpd.service"
+
+                echo -e "${CYAN}[*] Gestionando servicio: $SVC_FTP${NC}"
+                sudo systemctl unmask $SVC_FTP &> /dev/null
                 sudo systemctl enable $SVC_FTP &> /dev/null
-                sudo systemctl restart $SVC_FTP
-                echo -e "${GREEN}[OK] FTPS activado correctamente.${NC}"
+                sudo systemctl restart $SVC_FTP 2> /dev/null || sudo systemctl start $SVC_FTP
+                
+                if systemctl is-active $SVC_FTP &> /dev/null; then
+                   echo -e "${GREEN}[OK] FTPS activado correctamente.${NC}"
+                else
+                   echo -e "${RED}[!] Advertencia: El servicio existe pero falló al iniciar. Verifique vsftpd.conf${NC}"
+                fi
             else
                 echo -e "${RED}[!] Error: No se encontró el archivo de configuración vsftpd.conf${NC}"
             fi
