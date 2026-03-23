@@ -605,24 +605,35 @@ fn_instalar_web_con_ssl() {
 
     case "$SERVICIO" in
         apache)
-            fn_instalar_paquete "httpd"
+             # En Mageia el paquete se llama 'apache' y no 'httpd'
+            fn_instalar_paquete "apache" || { fn_err "Fallo la instalacion de Apache."; return 1; }
+            
             # Configurar puerto en Mageia
-            sed -i "s/^Listen 80/Listen ${PUERTO}/" /etc/httpd/conf/httpd.conf
+            # Tipicamente /etc/httpd/conf/httpd.conf
+            local CONF_PATH="/etc/httpd/conf/httpd.conf"
+            [ ! -f "$CONF_PATH" ] && CONF_PATH="/etc/apache2/conf/httpd.conf"
+            
+            if [ -f "$CONF_PATH" ]; then
+                sed -i "s/^Listen 80/Listen ${PUERTO}/" "$CONF_PATH"
+                sed -i "s/^ServerName .*/ServerName ${DOMINIO}:${PUERTO}/" "$CONF_PATH"
+            fi
+
             if [ "$SSL" = "si" ]; then
-                fn_instalar_paquete "mod_ssl"
+                fn_instalar_paquete "apache-mod_ssl" || { fn_err "Fallo la instalacion de mod_ssl."; return 1; }
                 fn_generar_certificado_ssl "apache"
                 # Path Mageia: /etc/httpd/conf.d/ssl.conf
             fi
-            systemctl enable --now httpd 2>/dev/null
-            fn_ok "Apache (httpd) instalado y activo."
+            
+            systemctl enable --now httpd 2>/dev/null || systemctl enable --now apache2 2>/dev/null
+            fn_ok "Apache instalado y activo."
             ;;
         nginx)
-            fn_instalar_paquete "nginx"
+            fn_instalar_paquete "nginx" || { fn_err "Fallo la instalacion de Nginx."; return 1; }
             systemctl enable --now nginx 2>/dev/null
             fn_ok "Nginx instalado y activo."
             ;;
         tomcat)
-            fn_instalar_paquete "tomcat"
+            fn_instalar_paquete "tomcat" || { fn_err "Fallo la instalacion de Tomcat."; return 1; }
             systemctl enable --now tomcat 2>/dev/null
             fn_ok "Tomcat instalado y activo."
             ;;
