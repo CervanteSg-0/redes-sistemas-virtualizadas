@@ -780,8 +780,11 @@ HTMLEOF
             fn_info "Iniciando 'Solución Nuclear' para Tomcat (Mageia)..."
             fn_instalar_paquete "tomcat" || { fn_err "Fallo la instalacion de Tomcat."; return 1; }
             
-            # Detener el servicio primero para evitar bloqueos
+            # Detener el servicio y MATAR procesos residuales (Zombis)
             systemctl stop tomcat 2>/dev/null
+            fn_info "Limpiando procesos internos de Java/Tomcat..."
+            killall -9 java 2>/dev/null
+            pkill -9 -f tomcat 2>/dev/null
             
             local TOMCAT_XML="/etc/tomcat/server.xml"
             fn_info "Generando configuracion MINIMA LIMPIA para Tomcat en puerto ${PUERTO}..."
@@ -789,7 +792,7 @@ HTMLEOF
             # Sobreescribimos COMPLETAMENTE el server.xml con una version minimalista conocida que funciona
             cat > "$TOMCAT_XML" <<TOMCAT_EOF
 <?xml version="1.0" encoding="UTF-8"?>
-<Server port="-1" shutdown="SHUTDOWN">
+<Server port="8005" shutdown="SHUTDOWN">
   <Service name="Catalina">
     <Connector port="${PUERTO}" protocol="HTTP/1.1" 
                connectionTimeout="20000" 
@@ -804,20 +807,19 @@ HTMLEOF
 </Server>
 TOMCAT_EOF
 
-            # Limpiar cache y asegurar permisos
+            # Limpiar cache y asegurar permisos absolutos
             rm -rf /var/lib/tomcat/work/*
-            chown -R tomcat:tomcat /etc/tomcat /var/lib/tomcat /var/log/tomcat 2>/dev/null
+            mkdir -p /var/log/tomcat /var/lib/tomcat/webapps/ROOT
+            chown -R tomcat:tomcat /etc/tomcat /var/lib/tomcat /var/log/tomcat /usr/share/tomcat 2>/dev/null
             chmod 644 "$TOMCAT_XML"
 
             # Crear pagina de bienvenida JSP personalizada
             local TOMCAT_ROOT="/var/lib/tomcat/webapps/ROOT"
-            mkdir -p "$TOMCAT_ROOT"
-            chown -R tomcat:tomcat "$TOMCAT_ROOT" 2>/dev/null
             cat > "$TOMCAT_ROOT/index.jsp" <<JSPEOF
 <%@ page language="java" contentType="text/html; charset=UTF-8" pageEncoding="UTF-8"%>
 <!DOCTYPE html>
 <html>
-<body style="background:#f0f7ff; color:#333; text-align:center; padding-top:100px; font-family:sans-serif;">
+<body style="background:#f4f7f6; color:#333; text-align:center; padding-top:100px; font-family:sans-serif;">
     <div style="background:white; border-radius:15px; display:inline-block; padding:50px; box-shadow:0 10px 25px rgba(0,0,0,0.1); border-top: 6px solid #f44336;">
         <h1 style="color:#f44336;">Tomcat - MAGEIA LINUX</h1>
         <h2 style="color:#2c3e50;">¡Servicio Activo en el Puerto ${PUERTO}!</h2>
@@ -828,7 +830,7 @@ TOMCAT_EOF
 JSPEOF
 
             systemctl enable --now tomcat 2>/dev/null
-            systemctl restart tomcat
+            systemctl start tomcat
             
             # Forzar apertura en el firewall
             if command -v firewall-cmd &>/dev/null; then
@@ -838,7 +840,7 @@ JSPEOF
                 fn_ok "Firewall configurado para puerto ${PUERTO}."
             fi
             
-            # Verificacion con paciencia extrema (30 segundos total)
+            # Verificacion con paciencia
             fn_info "Verificando arranque de Tomcat (30 segs max)..."
             local ATTEMPTS=0
             local MAX_ATTEMPTS=15
@@ -854,9 +856,9 @@ JSPEOF
             done
             
             if [ "$STARTED" = "false" ]; then
-                fn_err "Tomcat sigue sin responder después de la espera."
-                fn_info "Causa probable (Ultimos logs):"
-                journalctl -u tomcat -n 15 --no-pager
+                fn_err "Tomcat sigue sin responder después de 30s."
+                fn_info "Causa probable (Logs del sistema):"
+                journalctl -u tomcat -n 20 --no-pager
                 return 1
             else
                 fn_ok "Tomcat listo y desplegado."
