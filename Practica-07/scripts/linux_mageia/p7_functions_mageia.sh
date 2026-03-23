@@ -586,6 +586,13 @@ rsa_cert_file=${SSL_DIR}/vsftpd/vsftpd.crt
 rsa_private_key_file=${SSL_DIR}/vsftpd/vsftpd.key
 force_local_data_ssl=YES
 force_local_logins_ssl=YES
+ssl_sslv2=NO
+ssl_sslv3=NO
+ssl_tlsv1=YES
+ssl_tlsv1_1=YES
+ssl_tlsv1_2=YES
+require_ssl_reuse=NO
+ssl_ciphers=HIGH
 FTPSEOF
         systemctl restart vsftpd 2>/dev/null
         fn_ok "vsftpd reiniciado con SSL (Mageia)."
