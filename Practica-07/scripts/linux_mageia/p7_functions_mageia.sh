@@ -58,12 +58,15 @@ fn_verificar_root_p7() {
 # Detector de gestor de paquetes (dnf preferido en Mageia moderno, urpmi como fallback)
 fn_instalar_paquete() {
     local PKG="$1"
+    fn_info "Ejecutando instalacion de: ${PKG}..."
     if command -v dnf &>/dev/null; then
-        dnf install -y "$PKG" &>/dev/null || true
+        # dnf puede tardar en sincronizar repositorios. Se quita el silencio para ver el progreso.
+        dnf install -y "$PKG"
     elif command -v urpmi &>/dev/null; then
-        urpmi --auto "$PKG" &>/dev/null || true
+        urpmi --auto "$PKG"
     else
         fn_err "No se detecto gestor de paquetes (dnf/urpmi)."
+        return 1
     fi
 }
 
