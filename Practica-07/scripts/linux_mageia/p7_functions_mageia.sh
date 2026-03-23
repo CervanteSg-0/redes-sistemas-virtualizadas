@@ -750,6 +750,16 @@ fn_instalar_servicio_hibrido() {
     echo -e "${YELLOW}¿Origen?${NC}"
     echo "  [1] WEB - DNF/URPMI (internet)"
     echo "  [2] FTP - Repositorio privado"
+    
+    local ORIGEN=""
+    while true; do
+        read -r ORIGEN
+        case "$ORIGEN" in
+            1|2) break ;;
+            *) fn_err "Elige 1 (WEB) o 2 (FTP)" ;;
+        esac
+    done
+
     # Solicitar puerto
     echo ""
     echo -e "${YELLOW}Ingresa el puerto para ${NOMBRE_DISPLAY} (ej: 8080, 9091, 5051):${NC}"
