@@ -92,21 +92,23 @@ fn_verificar_dependencias() {
 
 fn_ftp_listar() {
     local RUTA="$1"
-    curl -s --connect-timeout 10 \
+    # Se agrega --ftp-pasv para mejorar la conexion y redireccion de error para ver por que falla
+    curl -s --connect-timeout 10 --ftp-pasv \
         "ftp://${FTP_SERVER}:${FTP_PORT}${RUTA}" \
         --user "${FTP_USER}:${FTP_PASS}" \
-        -l 2>/dev/null
+        -l 2>&1
 }
 
+# Descargar un archivo del servidor FTP
 fn_ftp_descargar() {
     local RUTA_REMOTA="$1"
     local DESTINO="$2"
 
     fn_info "Descargando desde FTP: ${RUTA_REMOTA}..."
-    curl -s --connect-timeout 30 --progress-bar \
+    curl -s --connect-timeout 30 --progress-bar --ftp-pasv \
         "ftp://${FTP_SERVER}:${FTP_PORT}${RUTA_REMOTA}" \
         --user "${FTP_USER}:${FTP_PASS}" \
-        -o "$DESTINO" 2>/dev/null
+        -o "$DESTINO" 
 
     if [ $? -eq 0 ] && [ -s "$DESTINO" ]; then
         fn_ok "Archivo descargado: $DESTINO"
@@ -748,10 +750,29 @@ fn_instalar_servicio_hibrido() {
     echo -e "${YELLOW}¿Origen?${NC}"
     echo "  [1] WEB - DNF/URPMI (internet)"
     echo "  [2] FTP - Repositorio privado"
-    read -r ORIGEN
-
-    echo -e "${YELLOW}Puerto:${NC}"
-    read -r PUERTO
+    # Solicitar puerto
+    echo ""
+    echo -e "${YELLOW}Ingresa el puerto para ${NOMBRE_DISPLAY} (ej: 8080, 9091, 5051):${NC}"
+    local PUERTO=""
+    while true; do
+        read -r PUERTO
+        if [[ "$PUERTO" =~ ^[0-9]+$ ]] && [ "$PUERTO" -ge 1 ] && [ "$PUERTO" -le 65535 ]; then
+            if [ "$PUERTO" -eq 21 ]; then
+                fn_err "El puerto 21 es de FTP. ¡NO lo uses para servicios web para evitar conflictos!"
+                echo -e "${YELLOW}Por favor, elige otro puerto (ej: 80, 8080 o el puerto de tu matricula):${NC}"
+                continue
+            fi
+            
+            if ss -tlnp 2>/dev/null | grep -q ":${PUERTO} "; then
+                fn_err "Puerto ${PUERTO} ya esta en uso. Elige otro."
+            else
+                fn_ok "Puerto ${PUERTO} disponible."
+                break
+            fi
+        else
+            fn_err "Puerto invalido. Debe ser entre 1 y 65535."
+        fi
+    done
 
     local SSL="no"
     fn_preguntar_ssl && SSL="si"
