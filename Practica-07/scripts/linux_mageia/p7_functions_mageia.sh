@@ -781,9 +781,16 @@ HTMLEOF
             
             local TOMCAT_XML="/etc/tomcat/server.xml"
             if [ -f "$TOMCAT_XML" ]; then
-                # Cambiar puerto 8080 por el puerto personalizado
-                sed -i "s/port=\"8080\"/port=\"${PUERTO}\"/" "$TOMCAT_XML"
-                fn_info "Puerto ${PUERTO} configurado en $TOMCAT_XML"
+                # Reemplazo mas robusto para cualquier variacion de espacios o comillas en el puerto 8080
+                sed -i "s/port=['\"]8080['\"]/port=\"${PUERTO}\"/g" "$TOMCAT_XML"
+                
+                # Verificar si el cambio se aplico realmente en el archivo
+                if grep -q "port=\"${PUERTO}\"" "$TOMCAT_XML"; then
+                    fn_info "Puerto ${PUERTO} confirmado en $TOMCAT_XML"
+                else
+                    fn_err "No se pudo cambiar el puerto en $TOMCAT_XML. Intentando forzar..."
+                    sed -i "s/Connector port=\"8080\"/Connector port=\"${PUERTO}\"/g" "$TOMCAT_XML"
+                fi
             else
                 fn_err "No se encontro server.xml de Tomcat."
             fi
