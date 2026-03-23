@@ -635,11 +635,63 @@ fn_instalar_web_con_ssl() {
             fn_info "Reiniciando el servicio para aplicar cambios..."
             systemctl enable httpd 2>/dev/null || systemctl enable apache2 2>/dev/null
             systemctl restart httpd || systemctl restart apache2
+            
+            # Crear pagina web dinamica para Apache
+            # Mageia usa /var/www/html por defecto
+            mkdir -p /var/www/html
+            cat > /var/www/html/index.html <<HTMLEOF
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Apache - Mageia Linux</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #1a1a2e; color: #eee;
+               display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .card { background: #16213e; padding: 40px 60px; border-radius: 12px;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.5); text-align: center; width: 450px; }
+        h1 { color: #e94560; font-size: 2.5em; margin-bottom: 25px; }
+        .badge { display: inline-block; background: #0f3460; padding: 8px 18px;
+                 border-radius: 8px; margin: 5px; font-weight: bold; }
+        .port-badge { background: #e94560; color: white; }
+        .footer { font-size: 0.9em; color: #888; margin-top: 30px; border-top: 1px solid #1f4068; padding-top: 15px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>Apache/Mageia</h1>
+        <div>
+            <span class="badge">Servidor: Linux</span>
+            <span class="badge">Versión: Latest</span>
+            <span class="badge port-badge">Puerto: ${PUERTO}</span>
+        </div>
+        <div class="footer">
+            Aprovisionado automáticamente - Práctica 7 - Mageia Linux
+        </div>
+    </div>
+</body>
+</html>
+HTMLEOF
+            fn_ok "Pagina web de Apache generada en el puerto ${PUERTO}."
             fn_ok "Apache reiniciado."
             ;;
         nginx)
             fn_instalar_paquete "nginx" || { fn_err "Fallo la instalacion de Nginx."; return 1; }
             systemctl enable --now nginx 2>/dev/null
+            
+            mkdir -p /usr/share/nginx/html
+            cat > /usr/share/nginx/html/index.html <<HTMLEOF
+<!DOCTYPE html>
+<html>
+<body style="background:#1a1a2e;color:white;text-align:center;padding-top:100px;font-family:sans-serif;">
+    <h1 style="color:#e94560;">Nginx/Mageia</h1>
+    <div style="background:#16213e;display:inline-block;padding:30px;border-radius:10px;">
+        <p>Servidor: Linux | Puerto: ${PUERTO}</p>
+        <p>Práctica 7 - Mageia Linux</p>
+    </div>
+</body>
+</html>
+HTMLEOF
             fn_ok "Nginx instalado y activo."
             ;;
         tomcat)
