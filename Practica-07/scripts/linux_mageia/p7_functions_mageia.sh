@@ -782,125 +782,78 @@ HTMLEOF
             
             # Detener el servicio y ELIMINAR CUALQUIER PROCESO JAVA (Limpia la practica anterior)
             systemctl stop tomcat 2>/dev/null
-            fn_info "Realizando limpieza de procesos Java y puertos de control (8005)..."
+            fn_info "Realizando limpieza de procesos Java..."
             killall -9 java 2>/dev/null
             pkill -9 -f tomcat 2>/dev/null
-            
-            local TOMCAT_XML="/etc/tomcat/server.xml"
-            fn_info "Generando configuracion MINIMA BLINDADA para Tomcat en puerto ${PUERTO}..."
 
-            # SOLUCION REAL: Buscar y sobreescribir TODOS los server.xml del sistema
-            # (Tomcat en Mageia puede leer de /usr/share/tomcat/conf/ en lugar de /etc/tomcat/)
-            fn_info "Buscando todos los archivos server.xml en el sistema..."
-            local SERVER_XML_LIST
-            # Incluir /opt/tomcat explicitamente (donde Practica 6 instalo Tomcat)
-            SERVER_XML_LIST=$(find /etc/tomcat /usr/share/tomcat /var/lib/tomcat /opt/tomcat /opt/tomcat* 2>/dev/null -name "server.xml" -type f)
-
-            if [ -z "$SERVER_XML_LIST" ]; then
-                fn_err "No se encontro ningun server.xml. Creando en /etc/tomcat/..."
-                mkdir -p /etc/tomcat
-                SERVER_XML_LIST="/etc/tomcat/server.xml"
-            fi
-
-            # Contenido de la nueva configuracion minimalista
-            local NEW_CONFIG='<?xml version="1.0" encoding="UTF-8"?>
-<Server port="-1" shutdown="SHUTDOWN">
-  <Service name="Catalina">
-    <Connector port="'"${PUERTO}"'" protocol="HTTP/1.1"
-               address="0.0.0.0"
-               connectionTimeout="20000"
-               redirectPort="8443" />
-    <Engine name="Catalina" defaultHost="localhost">
-      <Host name="localhost" appBase="webapps" unpackWARs="true" autoDeploy="true">
-        <Valve className="org.apache.catalina.valves.AccessLogValve" directory="logs"
-               prefix="localhost_access_log" suffix=".txt" pattern="%h %l %u %t &quot;%r&quot; %s %b" />
+            fn_info "Configurando server.xml en puerto ${PUERTO}..."
+            local TOMCAT_XML_CONF="<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<Server port=\"-1\" shutdown=\"SHUTDOWN\">
+  <Service name=\"Catalina\">
+    <Connector port=\"${PUERTO}\" protocol=\"HTTP/1.1\"
+               address=\"0.0.0.0\"
+               connectionTimeout=\"20000\"
+               redirectPort=\"8443\" />
+    <Engine name=\"Catalina\" defaultHost=\"localhost\">
+      <Host name=\"localhost\" appBase=\"webapps\" unpackWARs=\"true\" autoDeploy=\"true\">
+        <Valve className=\"org.apache.catalina.valves.AccessLogValve\" directory=\"logs\"
+               prefix=\"localhost_access_log\" suffix=\".txt\" pattern=\"%h %l %u %t &quot;%r&quot; %s %b\" />
       </Host>
     </Engine>
   </Service>
-</Server>'
+</Server>"
 
-            # Sobreescribir TODOS los archivos server.xml encontrados
-            echo "$SERVER_XML_LIST" | while IFS= read -r XML_FILE; do
-                [ -z "$XML_FILE" ] && continue
-                fn_info "Sobreescribiendo: $XML_FILE"
-                echo "$NEW_CONFIG" > "$XML_FILE"
-                chown tomcat:tomcat "$XML_FILE" 2>/dev/null
-                chmod 644 "$XML_FILE"
-                fn_ok "Configurado: $XML_FILE"
+
+            # Escribir server.xml en TODAS las rutas conocidas (sin loops complejos)
+            fn_info "Configurando server.xml en todas las ubicaciones conocidas..."
+            for XML_DIR in /etc/tomcat /usr/share/tomcat/conf /var/lib/tomcat/conf /opt/tomcat/conf; do
+                if [ -d "$XML_DIR" ]; then
+                    printf '%s\n' "$TOMCAT_XML_CONF" > "$XML_DIR/server.xml"
+                    chown tomcat:tomcat "$XML_DIR/server.xml" 2>/dev/null
+                    chmod 644 "$XML_DIR/server.xml"
+                    fn_ok "server.xml configurado: $XML_DIR/server.xml"
+                fi
             done
 
+            # Limpiar cache compilado de JSP en TODAS las ubicaciones
+            fn_info "Limpiando cache de JSP compilado..."
+            rm -rf /var/lib/tomcat/work/* /usr/share/tomcat/work/* /opt/tomcat/work/* 2>/dev/null
+            fn_ok "Cache limpiada."
 
-            # Limpiar cache compilado de JSP en TODOS los directorios work (incluyendo /opt/tomcat)
-            fn_info "Limpiando cache de JSP compilado en todas las ubicaciones..."
-            rm -rf /var/lib/tomcat/work/* 2>/dev/null
-            rm -rf /usr/share/tomcat/work/* 2>/dev/null
-            rm -rf /opt/tomcat/work/* 2>/dev/null
-            find /opt/tomcat* -type d -name "work" 2>/dev/null | xargs rm -rf 2>/dev/null
-            fn_ok "Cache de Tomcat limpiada."
-            
             mkdir -p /var/log/tomcat
-            chown -R tomcat:tomcat /etc/tomcat /var/lib/tomcat /var/log/tomcat /usr/share/tomcat 2>/dev/null
+            chown -R tomcat:tomcat /etc/tomcat /var/lib/tomcat /var/log/tomcat /usr/share/tomcat /opt/tomcat 2>/dev/null
 
-
-            # Detectar CATALINA_BASE/HOME desde el servicio systemd
-            local CATALINA_BASE=""
-            CATALINA_BASE=$(grep -E "CATALINA_BASE|CATALINA_HOME" /usr/lib/systemd/system/tomcat.service \
-                            /etc/systemd/system/tomcat.service 2>/dev/null \
-                            | grep -oP '(?<==)[^ ]+' | head -1)
-            fn_info "CATALINA_BASE detectado: ${CATALINA_BASE:-no detectado, usando rutas por defecto}"
-
-            # Contenido del nuevo index.jsp (Practica 7)
-            local JSP_CONTENT='<%@ page language="java" contentType="text/html; charset=UTF-8" pageEncoding="UTF-8"%>
+            # Escribir index.jsp en TODAS las rutas conocidas (sin loops complejos)
+            fn_info "Escribiendo pagina Practica 7 en todas las ubicaciones conocidas..."
+            for ROOT_DIR in /var/lib/tomcat/webapps/ROOT /usr/share/tomcat/webapps/ROOT /opt/tomcat/webapps/ROOT; do
+                mkdir -p "$ROOT_DIR"
+                cat > "$ROOT_DIR/index.jsp" <<'JSPEOF'
+<%@ page language="java" contentType="text/html; charset=UTF-8" pageEncoding="UTF-8"%>
 <!DOCTYPE html>
 <html>
-<head>
-    <title>Tomcat - Practica 7 - Mageia Linux</title>
-</head>
-<body style="background:#0f172a; color:#e2e8f0; text-align:center; padding-top:100px; font-family:sans-serif;">
-    <div style="background:#1e293b; border-radius:15px; display:inline-block; padding:50px 70px; box-shadow:0 20px 40px rgba(0,0,0,0.4); border-top: 6px solid #ef4444;">
-        <h1 style="color:#38bdf8; font-size:2.5em; margin-bottom:5px;">Tomcat</h1>
-        <p style="color:#94a3b8; margin-bottom:25px;">Servidor Web - Mageia Linux</p>
-        <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap;">
-            <span style="background:#ef4444; color:white; padding:8px 20px; border-radius:20px; font-weight:bold;">Servidor: Linux</span>
-            <span style="background:#3b82f6; color:white; padding:8px 20px; border-radius:20px; font-weight:bold;">Version: <%= application.getServerInfo() %></span>
-            <span style="background:#ef4444; color:white; padding:8px 20px; border-radius:20px; font-weight:bold;">Puerto: <%= request.getServerPort() %></span>
-        </div>
-        <p style="margin-top:25px; color:#64748b; font-size:0.85em;">Aprovisionado automaticamente - Practica 7 - Mageia Linux</p>
+<head><title>Tomcat - Practica 7 - Mageia Linux</title></head>
+<body style="background:#0f172a;color:#e2e8f0;text-align:center;padding-top:100px;font-family:sans-serif;">
+  <div style="background:#1e293b;border-radius:15px;display:inline-block;padding:50px 70px;box-shadow:0 20px 40px rgba(0,0,0,0.4);border-top:6px solid #ef4444;">
+    <h1 style="color:#38bdf8;font-size:2.5em;margin-bottom:5px;">Tomcat</h1>
+    <p style="color:#94a3b8;margin-bottom:25px;">Servidor Web - Mageia Linux</p>
+    <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
+      <span style="background:#ef4444;color:white;padding:8px 20px;border-radius:20px;font-weight:bold;">Servidor: Linux</span>
+      <span style="background:#3b82f6;color:white;padding:8px 20px;border-radius:20px;font-weight:bold;">Version: <%= application.getServerInfo() %></span>
+      <span style="background:#ef4444;color:white;padding:8px 20px;border-radius:20px;font-weight:bold;">Puerto: <%= request.getServerPort() %></span>
     </div>
+    <p style="margin-top:25px;color:#64748b;font-size:0.85em;">Aprovisionado automaticamente - Practica 7 - Mageia Linux</p>
+  </div>
 </body>
-</html>'
-
-            # Buscar ABSOLUTAMENTE TODOS los index.jsp bajo cualquier directorio webapps
-            fn_info "Buscando todos los index.jsp de Tomcat en el sistema (busqueda total)..."
-            local JSP_LIST
-            JSP_LIST=$(find / -name "index.jsp" -path "*/webapps/*" \
-                         -not -path "*/proc/*" -not -path "*/sys/*" 2>/dev/null | tr '\n' ' ')
-
-            # Asegurar rutas base siempre incluidas
-            mkdir -p /var/lib/tomcat/webapps/ROOT /usr/share/tomcat/webapps/ROOT 2>/dev/null
-            JSP_LIST="$JSP_LIST /var/lib/tomcat/webapps/ROOT/index.jsp /usr/share/tomcat/webapps/ROOT/index.jsp"
-
-            # Añadir /opt/tomcat EXPLICITAMENTE (Practica 6 instalo Tomcat ahi)
-            mkdir -p /opt/tomcat/webapps/ROOT 2>/dev/null
-            JSP_LIST="$JSP_LIST /opt/tomcat/webapps/ROOT/index.jsp"
-
-            # Añadir ruta de CATALINA_BASE si se detecto
-            if [ -n "$CATALINA_BASE" ]; then
-                mkdir -p "${CATALINA_BASE}/webapps/ROOT" 2>/dev/null
-                JSP_LIST="$JSP_LIST ${CATALINA_BASE}/webapps/ROOT/index.jsp"
-            fi
-
-
-            # Escribir en todos los archivos encontrados
-            echo "$JSP_LIST" | tr ' ' '\n' | sort -u | while IFS= read -r JSP_FILE; do
-                [ -z "$JSP_FILE" ] && continue
-                JSP_DIR=$(dirname "$JSP_FILE")
-                mkdir -p "$JSP_DIR"
-                echo "$JSP_CONTENT" > "$JSP_FILE"
-                chown -R tomcat:tomcat "$JSP_DIR" 2>/dev/null
-                fn_ok "JSP actualizado: $JSP_FILE"
+</html>
+JSPEOF
+                chown -R tomcat:tomcat "$ROOT_DIR" 2>/dev/null
+                fn_ok "JSP escrito en: $ROOT_DIR/index.jsp"
             done
 
+
+            systemctl stop tomcat 2>/dev/null
+            killall -9 java 2>/dev/null
+            pkill -9 -f tomcat 2>/dev/null
 
             systemctl enable --now tomcat 2>/dev/null
             systemctl start tomcat
