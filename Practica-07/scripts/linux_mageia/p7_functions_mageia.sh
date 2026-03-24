@@ -575,17 +575,47 @@ fn_configurar_ftps() {
         -subj "/C=MX/ST=Sinaloa/L=Los_Mochis/O=Reprobados/OU=FTP/CN=${DOMINIO}" \
         2>/dev/null
 
+    # Crear jerarquia de directorios FTP: /pub/linux/{apache,nginx,tomcat}
+    fn_info "Creando estructura de directorios FTP: /pub/linux/{apache,nginx,tomcat}..."
+    local FTP_ROOT="/srv/ftp"
+    mkdir -p "${FTP_ROOT}/pub/linux/apache"
+    mkdir -p "${FTP_ROOT}/pub/linux/nginx"
+    mkdir -p "${FTP_ROOT}/pub/linux/tomcat"
+
+    # Permisos: /srv/ftp debe ser de root (requerido por vsftpd)
+    chown root:root "${FTP_ROOT}"
+    chmod 755 "${FTP_ROOT}"
+
+    # /pub y subdirectorios: propiedad de ftp con permisos de escritura para anonymous
+    chown -R ftp:ftp "${FTP_ROOT}/pub"
+    chmod -R 777 "${FTP_ROOT}/pub"
+
+    fn_ok "Estructura creada:"
+    fn_ok "  ${FTP_ROOT}/pub/linux/apache/"
+    fn_ok "  ${FTP_ROOT}/pub/linux/nginx/"
+    fn_ok "  ${FTP_ROOT}/pub/linux/tomcat/"
+
     local VSFTPD_CONF="/etc/vsftpd/vsftpd.conf"
     [ ! -f "$VSFTPD_CONF" ] && VSFTPD_CONF="/etc/vsftpd.conf"
 
     if [ -f "$VSFTPD_CONF" ]; then
-        fn_info "Generando configuracion limpia de vsftpd para Mageia..."
+        fn_info "Generando configuracion vsftpd con acceso anonymous completo..."
         cat > "$VSFTPD_CONF" <<FTPSEOF
-# Configuración corregida para Mageia
+# Configuracion vsftpd - Practica 7 - Mageia Linux
+# Acceso anonimo con permisos completos (lectura y escritura)
+
 anonymous_enable=YES
+no_anon_password=YES
+anon_root=${FTP_ROOT}
+anon_upload_enable=YES
+anon_mkdir_write_enable=YES
+anon_other_write_enable=YES
+anon_world_readable_only=NO
+
 local_enable=YES
 write_enable=YES
 local_umask=022
+
 dirmessage_enable=YES
 xferlog_enable=YES
 connect_from_port_20=YES
@@ -593,14 +623,14 @@ xferlog_std_format=YES
 listen=YES
 listen_ipv6=NO
 pam_service_name=vsftpd
-userlist_enable=YES
-tcp_wrappers=YES
+userlist_enable=NO
+tcp_wrappers=NO
 
-# Configuración SSL (FTPS)
+# SSL/FTPS
 ssl_enable=YES
 allow_anon_ssl=YES
-force_local_data_ssl=YES
-force_local_logins_ssl=YES
+force_local_data_ssl=NO
+force_local_logins_ssl=NO
 ssl_tlsv1=YES
 ssl_sslv2=NO
 ssl_sslv3=NO
@@ -608,13 +638,27 @@ require_ssl_reuse=NO
 ssl_ciphers=HIGH
 rsa_cert_file=${SSL_DIR}/vsftpd/vsftpd.crt
 rsa_private_key_file=${SSL_DIR}/vsftpd/vsftpd.key
+
+# Modo pasivo para compatibilidad con FileZilla
+pasv_enable=YES
+pasv_min_port=40000
+pasv_max_port=40100
 FTPSEOF
+
+        # Abrir puertos en firewall
+        if command -v firewall-cmd &>/dev/null; then
+            firewall-cmd --permanent --add-port=21/tcp 2>/dev/null
+            firewall-cmd --permanent --add-port=40000-40100/tcp 2>/dev/null
+            firewall-cmd --reload 2>/dev/null
+        fi
+
         systemctl restart vsftpd 2>/dev/null
-        fn_ok "vsftpd reiniciado con configuracion limpia y SSL."
+        fn_ok "vsftpd configurado con acceso anonymous completo y estructura /pub/linux/."
     else
         fn_err "No se encontro vsftpd.conf"
     fi
 }
+
 
 # -----------------------------------------------------------------------------
 # BLOQUE 8: INSTALACION WEB (URPMI/DNF) CON SSL OPCIONAL
