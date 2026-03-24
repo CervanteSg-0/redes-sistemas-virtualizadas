@@ -788,27 +788,45 @@ HTMLEOF
             
             local TOMCAT_XML="/etc/tomcat/server.xml"
             fn_info "Generando configuracion MINIMA BLINDADA para Tomcat en puerto ${PUERTO}..."
-            
-            # Sobreescribimos COMPLETAMENTE el server.xml con una version minimalista conocida que funciona
-            # Se usa port="-1" en Server para desactivar el puerto de control y evitar conflictos
-            # Se usa address="0.0.0.0" para asegurar escucha externa
-            cat > "$TOMCAT_XML" <<TOMCAT_EOF
-<?xml version="1.0" encoding="UTF-8"?>
+
+            # SOLUCION REAL: Buscar y sobreescribir TODOS los server.xml del sistema
+            # (Tomcat en Mageia puede leer de /usr/share/tomcat/conf/ en lugar de /etc/tomcat/)
+            fn_info "Buscando todos los archivos server.xml en el sistema..."
+            local SERVER_XML_LIST
+            SERVER_XML_LIST=$(find /etc/tomcat /usr/share/tomcat /var/lib/tomcat /opt/tomcat* 2>/dev/null -name "server.xml" -type f)
+
+            if [ -z "$SERVER_XML_LIST" ]; then
+                fn_err "No se encontro ningun server.xml. Creando en /etc/tomcat/..."
+                mkdir -p /etc/tomcat
+                SERVER_XML_LIST="/etc/tomcat/server.xml"
+            fi
+
+            # Contenido de la nueva configuracion minimalista
+            local NEW_CONFIG='<?xml version="1.0" encoding="UTF-8"?>
 <Server port="-1" shutdown="SHUTDOWN">
   <Service name="Catalina">
-    <Connector port="${PUERTO}" protocol="HTTP/1.1" 
+    <Connector port="'"${PUERTO}"'" protocol="HTTP/1.1"
                address="0.0.0.0"
-               connectionTimeout="20000" 
+               connectionTimeout="20000"
                redirectPort="8443" />
     <Engine name="Catalina" defaultHost="localhost">
-      <Host name="localhost"  appBase="webapps" unpackWARs="true" autoDeploy="true">
-        <Valve className="org.apache.catalina.valves.AccessLogValve" directory="logs" 
+      <Host name="localhost" appBase="webapps" unpackWARs="true" autoDeploy="true">
+        <Valve className="org.apache.catalina.valves.AccessLogValve" directory="logs"
                prefix="localhost_access_log" suffix=".txt" pattern="%h %l %u %t &quot;%r&quot; %s %b" />
       </Host>
     </Engine>
   </Service>
-</Server>
-TOMCAT_EOF
+</Server>'
+
+            # Sobreescribir TODOS los archivos server.xml encontrados
+            for XML_FILE in $SERVER_XML_LIST; do
+                fn_info "Sobreescribiendo: $XML_FILE"
+                echo "$NEW_CONFIG" > "$XML_FILE"
+                chown tomcat:tomcat "$XML_FILE" 2>/dev/null
+                chmod 644 "$XML_FILE"
+                fn_ok "Configurado: $XML_FILE"
+            done
+
 
             # Limpiar cache y asegurar permisos absolutos
             rm -rf /var/lib/tomcat/work/*
