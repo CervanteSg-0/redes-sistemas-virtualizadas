@@ -844,13 +844,13 @@ JSPEOF
                 fn_ok "Firewall configurado para puerto ${PUERTO}."
             fi
             
-            # Verificacion con paciencia
+            # Verificacion con patron flexible (no depende de espacio exacto)
             fn_info "Verificando arranque de Tomcat (30 segs max)..."
             local ATTEMPTS=0
             local MAX_ATTEMPTS=15
             local STARTED=false
             while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
-                if ss -tlnp 2>/dev/null | grep -q ":${PUERTO} "; then
+                if ss -tlnp 2>/dev/null | grep -qE ":${PUERTO}[[:space:]]|:${PUERTO}$"; then
                     fn_ok "Tomcat esta escuchando en el puerto ${PUERTO}."
                     STARTED=true
                     break
@@ -858,9 +858,19 @@ JSPEOF
                 sleep 2
                 ATTEMPTS=$((ATTEMPTS + 1))
             done
-            
+
+            # Segundo intento: verificar via curl por si ss no muestra bien
             if [ "$STARTED" = "false" ]; then
-                fn_err "Tomcat sigue sin responder después de 30s."
+                if curl -s --max-time 3 "http://localhost:${PUERTO}" &>/dev/null; then
+                    fn_ok "Tomcat responde via HTTP en el puerto ${PUERTO}."
+                    STARTED=true
+                fi
+            fi
+
+            if [ "$STARTED" = "false" ]; then
+                fn_err "Tomcat sigue sin responder despues de 30s."
+                fn_info "Puertos activos de Java en este momento:"
+                ss -tlnp | grep java
                 fn_info "Causa probable (Logs del sistema):"
                 journalctl -u tomcat -n 20 --no-pager
                 return 1
