@@ -830,10 +830,17 @@ HTMLEOF
             done
 
 
-            # Limpiar cache y asegurar permisos absolutos
-            rm -rf /var/lib/tomcat/work/* /usr/share/tomcat/work/* 2>/dev/null
+            # Limpiar cache compilado de JSP en TODOS los directorios work (incluyendo /opt/tomcat)
+            fn_info "Limpiando cache de JSP compilado en todas las ubicaciones..."
+            rm -rf /var/lib/tomcat/work/* 2>/dev/null
+            rm -rf /usr/share/tomcat/work/* 2>/dev/null
+            rm -rf /opt/tomcat/work/* 2>/dev/null
+            find /opt/tomcat* -type d -name "work" 2>/dev/null | xargs rm -rf 2>/dev/null
+            fn_ok "Cache de Tomcat limpiada."
+            
             mkdir -p /var/log/tomcat
             chown -R tomcat:tomcat /etc/tomcat /var/lib/tomcat /var/log/tomcat /usr/share/tomcat 2>/dev/null
+
 
             # Detectar CATALINA_BASE/HOME desde el servicio systemd
             local CATALINA_BASE=""
