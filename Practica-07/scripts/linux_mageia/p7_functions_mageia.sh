@@ -24,7 +24,7 @@ FTP_SERVER="192.168.222.139"
 FTP_PORT="21"
 FTP_USER="anonymous"
 FTP_PASS="practica7@reprobados.com"
-FTP_BASE_PATH="/http/Linux"
+FTP_BASE_PATH="/pub/linux"
 DOMINIO="reprobados.com"
 SSL_DIR="/etc/ssl/practica7"
 RESUMEN_INSTALACIONES=""
@@ -600,8 +600,39 @@ fn_configurar_ftps() {
     fn_ok "  ${FTP_ROOT}/pub/linux/nginx/"
     fn_ok "  ${FTP_ROOT}/pub/linux/tomcat/"
 
+    # Limpiar posibles RPMs viejos y descargar TAR.GZ oficiales (que el script sabe compilar)
+    fn_info "Descargando instaladores .tar.gz oficiales para instalacion FTP..."
+    rm -f "${FTP_ROOT}/pub/linux/apache/"*.rpm 2>/dev/null
+    rm -f "${FTP_ROOT}/pub/linux/nginx/"*.rpm 2>/dev/null
+    rm -f "${FTP_ROOT}/pub/linux/tomcat/"*.rpm 2>/dev/null
+
+    if command -v curl &>/dev/null; then
+        fn_info "Descargando web server source/binaries en fondo..."
+        
+        # Apache (Source)
+        if [ ! -f "${FTP_ROOT}/pub/linux/apache/httpd-2.4.62.tar.gz" ]; then
+            curl -s -L -o "${FTP_ROOT}/pub/linux/apache/httpd-2.4.62.tar.gz" https://dlcdn.apache.org/httpd/httpd-2.4.62.tar.gz &
+        fi
+        
+        # Nginx (Source)
+        if [ ! -f "${FTP_ROOT}/pub/linux/nginx/nginx-1.26.2.tar.gz" ]; then
+            curl -s -L -o "${FTP_ROOT}/pub/linux/nginx/nginx-1.26.2.tar.gz" https://nginx.org/download/nginx-1.26.2.tar.gz &
+        fi
+        
+        # Tomcat (Binary)
+        if [ ! -f "${FTP_ROOT}/pub/linux/tomcat/apache-tomcat-9.0.98.tar.gz" ]; then
+            curl -s -L -o "${FTP_ROOT}/pub/linux/tomcat/apache-tomcat-9.0.98.tar.gz" https://dlcdn.apache.org/tomcat/tomcat-9/v9.0.98/bin/apache-tomcat-9.0.98.tar.gz &
+        fi
+        
+        wait
+        fn_ok "Descargas completadas."
+    else
+        fn_err "Instale curl para descargas automaticas o descargue manualmente."
+    fi
+
     local VSFTPD_CONF="/etc/vsftpd/vsftpd.conf"
     [ ! -f "$VSFTPD_CONF" ] && VSFTPD_CONF="/etc/vsftpd.conf"
+
 
     if [ -f "$VSFTPD_CONF" ]; then
         fn_info "Generando configuracion vsftpd con acceso anonymous completo..."
