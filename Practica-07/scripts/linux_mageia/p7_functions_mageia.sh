@@ -830,26 +830,44 @@ HTMLEOF
 
             # Limpiar cache y asegurar permisos absolutos
             rm -rf /var/lib/tomcat/work/*
-            mkdir -p /var/log/tomcat /var/lib/tomcat/webapps/ROOT
+            mkdir -p /var/log/tomcat
             chown -R tomcat:tomcat /etc/tomcat /var/lib/tomcat /var/log/tomcat /usr/share/tomcat 2>/dev/null
-            chmod 644 "$TOMCAT_XML"
 
-            # Crear pagina de bienvenida JSP personalizada
-            local TOMCAT_ROOT="/var/lib/tomcat/webapps/ROOT"
-            cat > "$TOMCAT_ROOT/index.jsp" <<JSPEOF
+            # Buscar TODOS los directorios webapps/ROOT y sobreescribir el index.jsp en cada uno
+            fn_info "Buscando todos los directorios webapps/ROOT para actualizar la pagina..."
+            local ROOT_DIRS
+            ROOT_DIRS=$(find /var/lib/tomcat /usr/share/tomcat /opt/tomcat* 2>/dev/null -type d -name "ROOT")
+
+            [ -z "$ROOT_DIRS" ] && ROOT_DIRS="/var/lib/tomcat/webapps/ROOT"
+            mkdir -p /var/lib/tomcat/webapps/ROOT
+
+            for ROOT_DIR in $ROOT_DIRS; do
+                fn_info "Actualizando JSP en: $ROOT_DIR"
+                cat > "$ROOT_DIR/index.jsp" <<'JSPEOF'
 <%@ page language="java" contentType="text/html; charset=UTF-8" pageEncoding="UTF-8"%>
 <!DOCTYPE html>
 <html>
-<body style="background:#f4f7f6; color:#333; text-align:center; padding-top:100px; font-family:sans-serif;">
-    <div style="background:white; border-radius:15px; display:inline-block; padding:50px; box-shadow:0 10px 25px rgba(0,0,0,0.1); border-top: 6px solid #f44336;">
-        <h1 style="color:#f44336;">Tomcat - MAGEIA LINUX</h1>
-        <h2 style="color:#2c3e50;">¡Servicio Activo en el Puerto ${PUERTO}!</h2>
-        <p>Aprovisionado exitosamente por el script de la Práctica 7.</p>
-        <p>Control de sesión: Limpio (Puerto 8005 deshabilitado)</p>
+<head>
+    <title>Tomcat - Practica 7 - Mageia Linux</title>
+</head>
+<body style="background:#0f172a; color:#e2e8f0; text-align:center; padding-top:100px; font-family:sans-serif;">
+    <div style="background:#1e293b; border-radius:15px; display:inline-block; padding:50px 70px; box-shadow:0 20px 40px rgba(0,0,0,0.4); border-top: 6px solid #ef4444;">
+        <h1 style="color:#38bdf8; font-size:2.5em; margin-bottom:5px;">Tomcat</h1>
+        <p style="color:#94a3b8; margin-bottom:25px;">Servidor Web - Mageia Linux</p>
+        <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap;">
+            <span style="background:#ef4444; color:white; padding:8px 20px; border-radius:20px; font-weight:bold;">Servidor: Linux</span>
+            <span style="background:#3b82f6; color:white; padding:8px 20px; border-radius:20px; font-weight:bold;">Version: <%= application.getServerInfo() %></span>
+            <span style="background:#ef4444; color:white; padding:8px 20px; border-radius:20px; font-weight:bold;">Puerto: <%= request.getServerPort() %></span>
+        </div>
+        <p style="margin-top:25px; color:#64748b; font-size:0.85em;">Aprovisionado automaticamente - Practica 7 - Mageia Linux</p>
     </div>
 </body>
 </html>
 JSPEOF
+                chown -R tomcat:tomcat "$ROOT_DIR" 2>/dev/null
+                fn_ok "Pagina actualizada en: $ROOT_DIR"
+            done
+
 
             systemctl enable --now tomcat 2>/dev/null
             systemctl start tomcat
