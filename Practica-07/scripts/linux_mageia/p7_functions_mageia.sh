@@ -583,7 +583,19 @@ fn_instalar_tomcat_ftp() {
 </html>
 HTMLEOF
 
+    # Matar cualquier instalacion previa para limpiar el puerto
+    systemctl stop tomcat 2>/dev/null
+    killall -9 java 2>/dev/null
+    pkill -9 -f tomcat 2>/dev/null
+    sleep 2
+
     su -s /bin/sh tomcat -c "${TOMCAT_BASE}/bin/startup.sh" 2>/dev/null
+    
+    # Tomcat (Java) tarda unos segundos en arrancar por completo y abrir el puerto.
+    # Necesitamos esperar antes de que el script de verificacion intente revisar el puerto.
+    fn_info "Esperando a que Tomcat inicie sus servicios Java (10s)..."
+    sleep 10
+
     fn_ok "Tomcat iniciado en Mageia."
     RESUMEN_INSTALACIONES="${RESUMEN_INSTALACIONES}\n[Tomcat] Puerto: ${PUERTO} | SSL: ${SSL} | Origen: FTP"
 }
