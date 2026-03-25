@@ -54,40 +54,65 @@ function fn_configurar_ftp_windows {
     # Crear sitio desde cero
     New-WebFtpSite -Name "Practica7_FTP" -Port 21 -PhysicalPath $Root -Force
     
-    # Configuracion de Autenticacion Anónima (Mapeo a cuenta de sistema)
-    # 0 = UserIsolation.Mode: None
+    # Configuracion de Autenticacion Anónima (Mapeo a cuenta IUSR del sistema)
+    # 0 = UserIsolation.Mode: None (sin aislamiento, todos ven el mismo root)
     Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.userIsolation.mode" -Value 0
     Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.authentication.anonymousAuthentication.enabled" -Value $true
-    
-    # Forzar el uso del "AppPoolIdentity" o IUSR heredado (dejar en blanco para que use el default de IIS)
+
+    # CORRECCION: userName debe ser "IUSR" explicitamente, no vacio.
+    # Si se deja vacio (""), IIS no puede resolver el home directory y devuelve:
+    # "530 User cannot log in, home directory inaccessible"
     if (Test-Path $appcmd) {
-        & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authentication/anonymousAuthentication /userName:"" /commit:apphost 2>$null
+        & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authentication/anonymousAuthentication /userName:"IUSR" /commit:apphost 2>$null
     }
 
-    # SSL para FTPS (Opcional)
+    # SSL para FTPS (Opcional) - politica SslAllow permite conexion con y sin TLS
     $ftpCert = New-SelfSignedCertificate -DnsName "windows.ftp.local" -CertStoreLocation "cert:\LocalMachine\My" -ErrorAction SilentlyContinue
     if ($ftpCert) {
         Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.serverCertHash" -Value $ftpCert.GetCertHashString()
         Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.serverCertStoreName" -Value "My"
+        # CORRECCION: SslAllow en AMBOS canales para permitir conexion anonima sin TLS obligatorio
+        # SslRequire bloquearia a FileZilla en modo FTP simple (sin TLS)
         Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.controlChannelPolicy" -Value "SslAllow"
-        Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.dataChannelPolicy" -Value "SslAllow"
+        Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.dataChannelPolicy"    -Value "SslAllow"
+        fn_ok "Certificado SSL asignado al sitio FTP."
+    } else {
+        # Sin certificado: deshabilitar SSL completamente para no bloquear conexiones anonimas
+        fn_info "No se pudo crear certificado. Deshabilitando SSL para permitir FTP plano..."
+        if (Test-Path $appcmd) {
+            & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/ssl /controlChannelPolicy:"SslAllow" /dataChannelPolicy:"SslAllow" /commit:apphost 2>$null
+        }
     }
 
     fn_info "Configurando Autorización Definitiva..."
-    # Limpiar y agregar reglas de autorización para usuarios conocidos y desconocidos
+    # CORRECCION: Limpiar TODAS las reglas existentes primero con /clear para evitar
+    # conflictos, luego agregar reglas limpias para anonimos (?) y autenticados (*)
     if (Test-Path $appcmd) {
-        & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authorization /-"[users='?']" /commit:apphost 2>$null
-        & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authorization /+"[accessType='Allow',users='?',permissions='Read,Write']" /commit:apphost 2>$null
+        # Limpiar lista completa de reglas de autorizacion del sitio FTP
+        & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authorization /clear /commit:apphost 2>$null
+        # Regla 1: Usuarios anonimos '?' - solo lectura (suficiente para ver carpetas en FileZilla)
+        & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authorization /+"[accessType='Allow',users='?',permissions='Read']" /commit:apphost 2>$null
+        # Regla 2: Usuarios autenticados '*' - lectura y escritura
         & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authorization /+"[accessType='Allow',users='*',permissions='Read,Write']" /commit:apphost 2>$null
     }
 
-    # Permisos NTFS Extremos (Fuerza Bruta)
-    # Agregamos 'ANONYMOUS LOGON' que es vital para el acceso FTP sin cuenta
-    icacls "$Root" /grant "Everyone:(OI)(CI)F" /T /C /Q
-    icacls "$Root" /grant "IUSR:(OI)(CI)F" /T /C /Q
+    # Permisos NTFS completos sobre el directorio raiz del FTP
+    # IUSR es la cuenta que usa el usuario anonimo de IIS FTP (userName:"IUSR")
+    # Sin estos permisos IIS devuelve "530 home directory inaccessible"
+    icacls "$Root" /grant "Everyone:(OI)(CI)F"        /T /C /Q
+    icacls "$Root" /grant "IUSR:(OI)(CI)F"            /T /C /Q
     icacls "$Root" /grant "ANONYMOUS LOGON:(OI)(CI)F" /T /C /Q
-    icacls "$Root" /grant "IIS_IUSRS:(OI)(CI)F" /T /C /Q
+    icacls "$Root" /grant "IIS_IUSRS:(OI)(CI)F"       /T /C /Q
     icacls "$Root" /grant "NETWORK SERVICE:(OI)(CI)F" /T /C /Q
+
+    # CORRECCION: Asegurar que IUSR tenga home directory accesible
+    # IIS FTP exige que el directorio raiz sea accesible por la cuenta anonima
+    $acl = Get-Acl $Root
+    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+        "IUSR", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow"
+    )
+    $acl.SetAccessRule($rule)
+    Set-Acl $Root $acl
     
     # Reinicio forzado de servicios
     Start-Service ftpsvc
