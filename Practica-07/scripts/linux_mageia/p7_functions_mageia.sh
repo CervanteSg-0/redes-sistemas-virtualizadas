@@ -583,12 +583,22 @@ HTMLEOF
 
     su -s /bin/sh tomcat -c "${TOMCAT_BASE}/bin/startup.sh" 2>/dev/null
     
-    # Tomcat (Java) tarda unos segundos en arrancar por completo y abrir el puerto.
-    # Necesitamos esperar antes de que el script de verificacion intente revisar el puerto.
-    fn_info "Esperando a que Tomcat inicie sus servicios Java (10s)..."
-    sleep 10
+    fn_info "Esperando a que Tomcat inicie sus servicios Java (Max 30s)..."
+    local STARTED="false"
+    for i in {1..15}; do
+        if ss -tlnp 2>/dev/null | grep -q ":${PUERTO} "; then
+            STARTED="true"
+            break
+        fi
+        sleep 2
+    done
 
-    fn_ok "Tomcat iniciado en Mageia."
+    if [ "$STARTED" = "true" ]; then
+        fn_ok "Tomcat iniciado en Mageia."
+    else
+        fn_err "Tomcat tardo demasiado en responder. Revisa el puerto más tarde."
+    fi
+
     RESUMEN_INSTALACIONES="${RESUMEN_INSTALACIONES}\n[Tomcat] Puerto: ${PUERTO} | SSL: ${SSL} | Origen: FTP"
 }
 
