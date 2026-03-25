@@ -29,7 +29,7 @@ function fn_show_header {
 function fn_configurar_ftp_windows {
     echo ""
     Write-Host "=== CONFIGURACION FTPS (Windows Server) ===" -ForegroundColor Cyan
-    fn_info "Preparando Servicios de IIS y FTP..."
+    fn_info "Realizando limpieza profunda y reset de FTP..."
     Install-WindowsFeature Web-FTP-Server,Web-FTP-Ext -IncludeManagementTools | Out-Null
     Import-Module WebAdministration 
 
@@ -41,25 +41,30 @@ function fn_configurar_ftp_windows {
     New-Item -Path "$Repo\apache" -ItemType Directory -Force | Out-Null
     New-Item -Path "$Repo\nginx" -ItemType Directory -Force | Out-Null
 
-    # Detener servicios conflictivos
+    # Reset total de servicios
     Stop-Service ftpsvc -Force -ErrorAction SilentlyContinue
-    Get-WebSite -Name "Default FTP Site" -ErrorAction SilentlyContinue | Stop-WebSite
-
-    # Borrado LIMPIO del sitio anterior (usando appcmd para evitar "Class not registered")
     $appcmd = "$env:systemroot\system32\inetsrv\appcmd.exe"
-    if (Get-WebSite -Name "Practica7_FTP" -ErrorAction SilentlyContinue) {
+    
+    # Detener y borrar el sitio si existe para recrearlo limpio
+    if (Get-Website -Name "Practica7_FTP" -ErrorAction SilentlyContinue) {
         if (Test-Path $appcmd) { & $appcmd delete site "Practica7_FTP" /commit:apphost 2>$null }
     }
+    Get-WebSite -Name "Default FTP Site" -ErrorAction SilentlyContinue | Stop-WebSite
 
-    # Creacion del sitio
+    # Crear sitio desde cero
     New-WebFtpSite -Name "Practica7_FTP" -Port 21 -PhysicalPath $Root -Force
     
-    # Configuracion de Anonimos y Aislamiento
+    # Configuracion de Autenticacion Anónima (Mapeo a cuenta de sistema)
+    # 0 = UserIsolation.Mode: None
+    Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.userIsolation.mode" -Value 0
     Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.authentication.anonymousAuthentication.enabled" -Value $true
-    Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.authentication.anonymousAuthentication.userName" -Value "IUSR"
-    Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.userIsolation.mode" -Value "None"
+    
+    # Forzar el uso del "AppPoolIdentity" o IUSR heredado (dejar en blanco para que use el default de IIS)
+    if (Test-Path $appcmd) {
+        & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authentication/anonymousAuthentication /userName:"" /commit:apphost 2>$null
+    }
 
-    # SSL para FTPS (Opcional pero habilitado)
+    # SSL para FTPS (Opcional)
     $ftpCert = New-SelfSignedCertificate -DnsName "windows.ftp.local" -CertStoreLocation "cert:\LocalMachine\My" -ErrorAction SilentlyContinue
     if ($ftpCert) {
         Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.serverCertHash" -Value $ftpCert.GetCertHashString()
@@ -68,22 +73,27 @@ function fn_configurar_ftp_windows {
         Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.dataChannelPolicy" -Value "SslAllow"
     }
 
-    fn_info "Forzando Autorización y Permisos NTFS..."
-    # Reglas de autorizacion por CMD para maxima compatibilidad
+    fn_info "Configurando Autorización Definitiva..."
+    # Limpiar y agregar reglas de autorización para usuarios conocidos y desconocidos
     if (Test-Path $appcmd) {
+        & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authorization /-"[users='?']" /commit:apphost 2>$null
+        & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authorization /+"[accessType='Allow',users='?',permissions='Read,Write']" /commit:apphost 2>$null
         & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authorization /+"[accessType='Allow',users='*',permissions='Read,Write']" /commit:apphost 2>$null
     }
 
-    # ACL Permissions TOTALES
+    # Permisos NTFS Extremos (Fuerza Bruta)
+    # Agregamos 'ANONYMOUS LOGON' que es vital para el acceso FTP sin cuenta
     icacls "$Root" /grant "Everyone:(OI)(CI)F" /T /C /Q
     icacls "$Root" /grant "IUSR:(OI)(CI)F" /T /C /Q
+    icacls "$Root" /grant "ANONYMOUS LOGON:(OI)(CI)F" /T /C /Q
+    icacls "$Root" /grant "IIS_IUSRS:(OI)(CI)F" /T /C /Q
     icacls "$Root" /grant "NETWORK SERVICE:(OI)(CI)F" /T /C /Q
     
-    # Reinicio y arranque
+    # Reinicio forzado de servicios
     Start-Service ftpsvc
     Start-WebSite -Name "Practica7_FTP" -ErrorAction SilentlyContinue
     
-    fn_ok "Configuracion FTPS completada. Intenta conectar ahora."
+    fn_ok "Reset de FTP completado. Intenta conectar ahora."
 
     fn_info "Descargando instaladores oficiales a las carpetas FTP desde Internet (esto puede tardar)..."
     try {
