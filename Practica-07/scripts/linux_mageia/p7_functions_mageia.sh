@@ -630,19 +630,17 @@ fn_configurar_ftps() {
     rm -f "${FTP_ROOT}/pub/linux/tomcat/"*.tar.gz 2>/dev/null
 
     if command -v curl &>/dev/null; then
-        fn_info "Descargando web server source/binaries en fondo..."
+        fn_info "Descargando instaladores uno por uno (por favor espera)..."
         
-        # Apache (Source)
-        curl -s -L -f -o "${FTP_ROOT}/pub/linux/apache/httpd-2.4.62.tar.gz" https://archive.apache.org/dist/httpd/httpd-2.4.62.tar.gz &
+        echo -e "${YELLOW}>> Descargando Apache (7MB)...${NC}"
+        curl --progress-bar -L -f -o "${FTP_ROOT}/pub/linux/apache/httpd-2.4.62.tar.gz" https://archive.apache.org/dist/httpd/httpd-2.4.62.tar.gz
         
-        # Nginx (Source)
-        curl -s -L -f -o "${FTP_ROOT}/pub/linux/nginx/nginx-1.26.2.tar.gz" https://nginx.org/download/nginx-1.26.2.tar.gz &
+        echo -e "${YELLOW}>> Descargando Nginx (1.2MB)...${NC}"
+        curl --progress-bar -L -f -o "${FTP_ROOT}/pub/linux/nginx/nginx-1.26.2.tar.gz" https://nginx.org/download/nginx-1.26.2.tar.gz
         
-        # Tomcat (Binary)
-        curl -s -L -f -o "${FTP_ROOT}/pub/linux/tomcat/apache-tomcat-9.0.98.tar.gz" https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.98/bin/apache-tomcat-9.0.98.tar.gz &
+        echo -e "${YELLOW}>> Descargando Tomcat 9 (12MB)...${NC}"
+        curl --progress-bar -L -f -o "${FTP_ROOT}/pub/linux/tomcat/apache-tomcat-9.0.98.tar.gz" https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.98/bin/apache-tomcat-9.0.98.tar.gz
         
-        wait
-
         fn_ok "Descargas completadas."
     else
         fn_err "Instale curl para descargas automaticas o descargue manualmente."
