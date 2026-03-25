@@ -383,17 +383,13 @@ APACHEEOF
         local CERT_DIR="${SSL_DIR}/apache"
         cat >> "$CONF" <<SSLEOF
 LoadModule ssl_module modules/mod_ssl.so
-Listen 443
-<VirtualHost *:443>
+
+<VirtualHost *:${PUERTO}>
     ServerName ${DOMINIO}
     DocumentRoot "/usr/local/apache2/htdocs"
     SSLEngine on
     SSLCertificateFile    ${CERT_DIR}/server.crt
     SSLCertificateKeyFile ${CERT_DIR}/server.key
-</VirtualHost>
-<VirtualHost *:${PUERTO}>
-    ServerName ${DOMINIO}
-    Redirect permanent / https://${DOMINIO}/
 </VirtualHost>
 SSLEOF
     fi
@@ -474,19 +470,16 @@ fn_instalar_nginx_ftp() {
 
     fn_ok "Nginx compilado e instalado en /usr/local/nginx"
 
-    local SSL_BLOCK=""
+    local SSL_ON=""
+    local SSL_CERTS=""
     if [ "$SSL" = "si" ]; then
         fn_generar_certificado_ssl "nginx"
         local CERT_DIR="${SSL_DIR}/nginx"
-        SSL_BLOCK="
-    server {
-        listen 443 ssl;
-        server_name ${DOMINIO};
+        SSL_ON="ssl"
+        SSL_CERTS="
         ssl_certificate     ${CERT_DIR}/server.crt;
         ssl_certificate_key ${CERT_DIR}/server.key;
-        root /usr/local/nginx/html;
-        index index.html;
-    }"
+        "
     fi
 
     cat > /usr/local/nginx/conf/nginx.conf <<NGINXEOF
@@ -494,13 +487,12 @@ events { worker_connections 1024; }
 http {
     include mime.types;
     server {
-        listen ${PUERTO};
+        listen ${PUERTO} ${SSL_ON};
         server_name ${DOMINIO};
+        ${SSL_CERTS}
         root /usr/local/nginx/html;
         index index.html;
-        $( [ "$SSL" = "si" ] && echo "return 301 https://\$host\$request_uri;" )
     }
-    ${SSL_BLOCK}
 }
 NGINXEOF
 
