@@ -517,9 +517,20 @@ NGINXEOF
 </html>
 HTMLEOF
 
+    # Matar cualquier servicio web previo que ocupe los puertos (ej. 443)
+    systemctl stop httpd nginx 2>/dev/null
+    killall -9 httpd apache2 nginx 2>/dev/null
+    sleep 2
+
     /usr/local/nginx/sbin/nginx 2>/dev/null
-    fn_ok "Nginx iniciado."
+    if [ $? -ne 0 ]; then
+        fn_err "nginx start fallo. Posible puerto bloqueado."
+    else
+        fn_ok "Nginx iniciado."
+    fi
+
     RESUMEN_INSTALACIONES="${RESUMEN_INSTALACIONES}\n[Nginx] Puerto: ${PUERTO} | SSL: ${SSL} | Origen: FTP"
+    return 0
 }
 
 # -----------------------------------------------------------------------------
