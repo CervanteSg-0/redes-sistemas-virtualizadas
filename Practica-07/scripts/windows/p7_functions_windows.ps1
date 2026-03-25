@@ -54,9 +54,14 @@ function fn_configurar_ftp_windows {
     }
 
     fn_info "Configurando Autorizacion Interna para Anonymous Logon..."
-    # Configurar las Reglas de Autorizacion usando appcmd (Evita fallos de dependencias COM en versiones antiguas)
+    # Configurar las Reglas de Autorizacion usando appcmd
     $appcmd = "$env:systemroot\system32\inetsrv\appcmd.exe"
     if (Test-Path $appcmd) {
+        # Asegurar que no haya aislamiento de usuarios (None)
+        Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.userIsolation.mode" -Value "None"
+        
+        # Limpiar y agregar regla de autorizacion para que no falle el login
+        & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authorization /-"[users='?']" /commit:apphost 2>$null
         & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authorization /+"[accessType='Allow',users='?',permissions='Read,Write']" /commit:apphost 2>$null
     }
 
@@ -68,7 +73,12 @@ function fn_configurar_ftp_windows {
     $acl.AddAccessRule($rule2)
     Set-Acl "C:\inetpub\ftproot" $acl
     
-    fn_ok "Soporte TLS/SSL y Permisos RW de Autorizacion FTP completados."
+    # Reiniciar servicio FTP para aplicar cambios de configuracion pesados
+    Stop-Service ftpsvc -Force -ErrorAction SilentlyContinue
+    Start-Sleep 1
+    Start-Service ftpsvc
+    
+    fn_ok "Autorizacion FTP y Permisos NTFS corregidos. Servicio Reiniciado."
 
     fn_info "Descargando instaladores oficiales a las carpetas FTP desde Internet (esto puede tardar)..."
     try {
