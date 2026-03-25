@@ -33,17 +33,28 @@ function fn_configurar_ftp_windows {
     Install-WindowsFeature Web-FTP-Server,Web-FTP-Ext -IncludeManagementTools | Out-Null
     Import-Module WebAdministration 
 
-    $Root = "C:\inetpub\ftproot\pub\windows"
-    New-Item -Path "$Root\iis" -ItemType Directory -Force | Out-Null
-    New-Item -Path "$Root\apache" -ItemType Directory -Force | Out-Null
-    New-Item -Path "$Root\nginx" -ItemType Directory -Force | Out-Null
+    $Root = "C:\Practica7_FTP"
+    if (-not (Test-Path $Root)) { New-Item -Path $Root -ItemType Directory -Force | Out-Null }
+    
+    $Repo = "$Root\pub\windows"
+    New-Item -Path "$Repo\iis" -ItemType Directory -Force | Out-Null
+    New-Item -Path "$Repo\apache" -ItemType Directory -Force | Out-Null
+    New-Item -Path "$Repo\nginx" -ItemType Directory -Force | Out-Null
 
-    if (-not (Get-WebSite -Name "Practica7_FTP" -ErrorAction SilentlyContinue)) {
-        New-WebFtpSite -Name "Practica7_FTP" -Port 21 -PhysicalPath "C:\inetpub\ftproot" -Force
-        Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.authentication.anonymousAuthentication.enabled" -Value $true
+    # Detener sitios que puedan chocar en puerto 21
+    Get-WebSite -Name "Default FTP Site" -ErrorAction SilentlyContinue | Stop-WebSite
+
+    # Recrear el sitio desde cero para asegurar limpieza total
+    if (Get-WebSite -Name "Practica7_FTP" -ErrorAction SilentlyContinue) {
+        Remove-WebSite -Name "Practica7_FTP" -Confirm:$false
     }
+    New-WebFtpSite -Name "Practica7_FTP" -Port 21 -PhysicalPath $Root -Force
+    
+    # Configuracion de Anonimos e Identidad
+    Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.authentication.anonymousAuthentication.enabled" -Value $true
+    Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.userIsolation.mode" -Value "None"
 
-    # Generar e inyectar Certificado SSL para el servicio FTP (FTPS) siempre
+    # Generar e inyectar Certificado SSL para el servicio FTP (FTPS)
     fn_info "Generando y enlazando certificado SSL para FTP (FTPS)..."
     $ftpCert = New-SelfSignedCertificate -DnsName "windows.ftp.local" -CertStoreLocation "cert:\LocalMachine\My" -ErrorAction SilentlyContinue
     if ($ftpCert) {
@@ -53,47 +64,55 @@ function fn_configurar_ftp_windows {
         Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.dataChannelPolicy" -Value "SslAllow"
     }
 
-    fn_info "Configurando Autorizacion Interna para Anonymous Logon..."
-    # Configurar las Reglas de Autorizacion usando appcmd
-    $appcmd = "$env:systemroot\system32\inetsrv\appcmd.exe"
-    if (Test-Path $appcmd) {
-        # Asegurar que no haya aislamiento de usuarios (None)
-        Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.userIsolation.mode" -Value "None"
+    fn_info "Configurando Autorizacion y Permisos NTFS (Fuerza Bruta)..."
+    
+    # Usar cmdlets de PowerShell para Autorizacion FTP (mas fiable que appcmd en este contexto)
+    # Limpiar reglas existentes para evitar duplicados o conflictos
+    try {
+        Clear-WebConfiguration -Filter /system.ftpServer/security/authorization -Location "Practica7_FTP" -ErrorAction SilentlyContinue
         
-        # Limpiar y agregar regla de autorizacion para que no falle el login
-        & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authorization /-"[users='?']" /commit:apphost 2>$null
-        & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authorization /+"[accessType='Allow',users='?',permissions='Read,Write']" /commit:apphost 2>$null
+        # Agregar regla de permiso total para Anonimos (?) y Todos (*)
+        Add-WebConfiguration -Filter /system.ftpServer/security/authorization -Location "Practica7_FTP" -Value @{accessType="Allow";users="?";permissions="Read,Write"}
+        Add-WebConfiguration -Filter /system.ftpServer/security/authorization -Location "Practica7_FTP" -Value @{accessType="Allow";users="*";permissions="Read,Write"}
+        fn_ok "Reglas de autorizacion FTP aplicadas."
+    } catch {
+        fn_err "Error al configurar reglas de autorizacion FTP."
     }
 
-    # ACL Permissions en Carpeta Fisica para IIS y IUSR
-    $acl = Get-Acl "C:\inetpub\ftproot"
-    $rule1 = New-Object System.Security.AccessControl.FileSystemAccessRule("IUSR", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
-    $rule2 = New-Object System.Security.AccessControl.FileSystemAccessRule("IIS_IUSRS", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
-    $acl.AddAccessRule($rule1)
-    $acl.AddAccessRule($rule2)
-    Set-Acl "C:\inetpub\ftproot" $acl
+    # ACL Permissions usando icacls (bypass radical de errores de ACL de PowerShell y permisos IUSR)
+    # Asegurar que el contenedor y los archivos hereden permisos
+    icacls "$Root" /grant "IUSR:(OI)(CI)F" /T /C /Q
+    icacls "$Root" /grant "IIS_IUSRS:(OI)(CI)F" /T /C /Q
+    icacls "$Root" /grant "Everyone:(OI)(CI)F" /T /C /Q
     
-    # Reiniciar servicio FTP para aplicar cambios de configuracion pesados
+    # Reiniciar servicio para aplicar cambios de configuracion pesados
+    fn_info "Reiniciando servicios de FTP..."
     Stop-Service ftpsvc -Force -ErrorAction SilentlyContinue
-    Start-Sleep 1
+    Start-Sleep 2
     Start-Service ftpsvc
     
-    fn_ok "Autorizacion FTP y Permisos NTFS corregidos. Servicio Reiniciado."
+    # Asegurar que el sitio este iniciado
+    $siteObj = Get-WebSite -Name "Practica7_FTP"
+    if ($siteObj.State -ne "Started") {
+        Start-WebSite -Name "Practica7_FTP"
+    }
+    
+    fn_ok "Soporte TLS/SSL y Permisos de Acceso FTP completados."
 
     fn_info "Descargando instaladores oficiales a las carpetas FTP desde Internet (esto puede tardar)..."
     try {
-        if (-not (Test-Path "$Root\apache\httpd.zip")) {
+        if (-not (Test-Path "$Repo\apache\httpd.zip")) {
             Write-Host ">> Descargando Apache HTTPD Windows (10MB)..." -ForegroundColor Yellow
-            Invoke-WebRequest "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.62-win64-VS17.zip" -UserAgent $Global:USER_AGENT -OutFile "$Root\apache\httpd.zip"
+            Invoke-WebRequest "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.62-win64-VS17.zip" -UserAgent $Global:USER_AGENT -OutFile "$Repo\apache\httpd.zip"
         }
-        if (-not (Test-Path "$Root\nginx\nginx.zip")) {
+        if (-not (Test-Path "$Repo\nginx\nginx.zip")) {
             Write-Host ">> Descargando Nginx Windows (1.5MB)..." -ForegroundColor Yellow
-            Invoke-WebRequest "https://nginx.org/download/nginx-1.26.2.zip" -UserAgent $Global:USER_AGENT -OutFile "$Root\nginx\nginx.zip"
+            Invoke-WebRequest "https://nginx.org/download/nginx-1.26.2.zip" -UserAgent $Global:USER_AGENT -OutFile "$Repo\nginx\nginx.zip"
         }
-        if (-not (Test-Path "$Root\iis\iis_web.zip")) {
+        if (-not (Test-Path "$Repo\iis\iis_web.zip")) {
             Write-Host ">> Descargando IIS Pack (Mock)..." -ForegroundColor Yellow
             Set-Content -Path "C:\Users\Public\dummy_iis.txt" -Value "IIS Modulo descargado de FTP local."
-            Compress-Archive -Path "C:\Users\Public\dummy_iis.txt" -DestinationPath "$Root\iis\iis_web.zip" -Force
+            Compress-Archive -Path "C:\Users\Public\dummy_iis.txt" -DestinationPath "$Repo\iis\iis_web.zip" -Force
         }
         fn_ok "Instaladores web guardados en el Repositorio FTP exitosamente."
     } catch {
@@ -135,14 +154,14 @@ function fn_instalar_servicio_hibrido {
     
     echo ""
     Write-Host "====== INSTALACION DE $Display (WINDOWS) ======" -ForegroundColor Cyan
-    Write-Host "¿Origen? [1] WEB (Internet)  [2] FTP (Local)" -ForegroundColor Yellow
+    Write-Host "Origen? [1] WEB (Internet)  [2] FTP (Local)" -ForegroundColor Yellow
     $O = Read-Host "Elige"
     $Origen = if ($O -eq "1") { "web" } elseif ($O -eq "2") { "ftp" } else { return }
 
     Write-Host "Ingresa puerto (ej: 8080, 5051):" -ForegroundColor Yellow
     $Puerto = Read-Host "Puerto"
 
-    Write-Host "¿Deseas instalar con certificado SSL (HTTPS)? (s/n)" -ForegroundColor Yellow
+    Write-Host "Deseas instalar con certificado SSL (HTTPS)? (s/n)" -ForegroundColor Yellow
     $SSL = Read-Host "SSL"
     if ($SSL -eq "s") {
         Write-Host "Dominio para certificado (ej: reprobados.com):" -ForegroundColor Yellow
