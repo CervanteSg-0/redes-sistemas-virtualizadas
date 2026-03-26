@@ -26,133 +26,119 @@ function fn_show_header {
     Write-Host ""
 }
 
-
 function fn_configurar_ftp_windows {
     echo ""
     Write-Host "=== CONFIGURACION FTPS (Windows Server) ===" -ForegroundColor Cyan
     fn_info "Realizando limpieza profunda y reset de FTP..."
 
-    Install-WindowsFeature Web-Server,Web-Mgmt-Tools,Web-Scripting-Tools,Web-FTP-Server,Web-FTP-Service,Web-FTP-Ext -IncludeManagementTools | Out-Null
-    Import-Module WebAdministration -ErrorAction Stop
+    Install-WindowsFeature Web-FTP-Server,Web-FTP-Ext -IncludeManagementTools | Out-Null
+    Import-Module WebAdministration -ErrorAction SilentlyContinue
 
-    $SiteName    = "Practica7_FTP"
-    $Root        = "C:\Practica7_FTP"
-    $AnonRoot    = Join-Path $Root "LocalUser\Public"
-    $Repo        = Join-Path $AnonRoot "pub\windows"
-    $PassiveLow  = 50000
-    $PassiveHigh = 50050
-    $appcmd      = "$env:windir\System32\inetsrv\appcmd.exe"
-
-    if (-not (Test-Path $appcmd)) {
-        throw "No se encontro appcmd.exe en $appcmd"
+    $Root = "C:\Practica7_FTP"
+    if (-not (Test-Path $Root)) { 
+        New-Item -Path $Root -ItemType Directory -Force | Out-Null 
     }
-
-    # Estructura correcta para IIS FTP anonimo
-    New-Item -Path $Repo -ItemType Directory -Force | Out-Null
+    
+    $Repo = "$Root\pub\windows"
     New-Item -Path "$Repo\iis"    -ItemType Directory -Force | Out-Null
     New-Item -Path "$Repo\apache" -ItemType Directory -Force | Out-Null
     New-Item -Path "$Repo\nginx"  -ItemType Directory -Force | Out-Null
-    Set-Content -Path (Join-Path $AnonRoot "README.txt") -Value "Repositorio FTP Practica 7" -Force
 
-    # Limpieza segura
-    if (Test-Path "IIS:\Sites\$SiteName") {
-        try { Stop-WebSite -Name $SiteName -ErrorAction SilentlyContinue } catch {}
-        try { Remove-Website -Name $SiteName -ErrorAction SilentlyContinue } catch {}
-    } else {
-        & $appcmd delete site /site.name:"$SiteName" 2>$null | Out-Null
-    }
-
-    if (Test-Path "IIS:\Sites\Default FTP Site") {
-        try { Stop-WebSite -Name "Default FTP Site" -ErrorAction SilentlyContinue } catch {}
-        try { Remove-Website -Name "Default FTP Site" -ErrorAction SilentlyContinue } catch {}
-    } else {
-        & $appcmd delete site /site.name:"Default FTP Site" 2>$null | Out-Null
-    }
-
+    # === LIMPIEZA SEGURA ===
     Stop-Service ftpsvc -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 1
 
-    # Crear sitio FTP limpio
-    New-WebFtpSite -Name $SiteName -Port 21 -PhysicalPath $Root -Force | Out-Null
-
-    # Configuracion del sitio FTP
-    & $appcmd set config -section:system.applicationHost/sites "/[name='$SiteName'].ftpServer.userIsolation.mode:StartInUsersDirectory" /commit:apphost | Out-Null
-    & $appcmd set config -section:system.applicationHost/sites "/[name='$SiteName'].ftpServer.security.authentication.anonymousAuthentication.enabled:True" /commit:apphost | Out-Null
-    & $appcmd set config -section:system.applicationHost/sites "/[name='$SiteName'].ftpServer.security.authentication.anonymousAuthentication.userName:IUSR" /commit:apphost | Out-Null
-    & $appcmd set config -section:system.applicationHost/sites "/[name='$SiteName'].ftpServer.security.authentication.basicAuthentication.enabled:False" /commit:apphost | Out-Null
-
-    # Reglas de autorizacion del sitio
-    Clear-WebConfiguration -Filter /system.ftpServer/security/authorization -PSPath 'IIS:\' -Location $SiteName -ErrorAction SilentlyContinue
-    Add-WebConfiguration -Filter /system.ftpServer/security/authorization -PSPath 'IIS:\' -Location $SiteName -Value @{accessType='Allow';users='?';permissions='Read'} | Out-Null
-
-    # Rango pasivo global para FileZilla
-    Set-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Filter 'system.ftpServer/firewallSupport' -Name 'lowDataChannelPort' -Value $PassiveLow
-    Set-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Filter 'system.ftpServer/firewallSupport' -Name 'highDataChannelPort' -Value $PassiveHigh
-
-    fn_ok "Autenticacion anonima y reglas FTP configuradas correctamente"
-
-    # Permisos NTFS
-    fn_info "Aplicando permisos NTFS correctos para IUSR..."
-    foreach ($p in @($Root, (Join-Path $Root 'LocalUser'), $AnonRoot, (Join-Path $AnonRoot 'pub'), $Repo)) {
-        if (Test-Path $p) {
-            icacls $p /grant 'IUSR:(OI)(CI)RX' /T /C /Q | Out-Null
-            icacls $p /grant 'IIS_IUSRS:(OI)(CI)RX' /T /C /Q | Out-Null
-            icacls $p /grant 'Users:(OI)(CI)RX' /T /C /Q | Out-Null
-        }
+    # Eliminar sitio si existe (forma segura)
+    if (Get-WebSite -Name "Practica7_FTP" -ErrorAction SilentlyContinue) {
+        Remove-WebSite -Name "Practica7_FTP" -ErrorAction SilentlyContinue
     }
+    Get-WebSite -Name "Default FTP Site" -ErrorAction SilentlyContinue | Stop-WebSite -ErrorAction SilentlyContinue
 
-    # SSL opcional
-    $ftpCert = New-SelfSignedCertificate -DnsName 'windows.ftp.local' -CertStoreLocation 'cert:\LocalMachine\My' -ErrorAction SilentlyContinue
-    if ($ftpCert) {
-        Set-ItemProperty "IIS:\Sites\$SiteName" -Name 'ftpServer.security.ssl.serverCertHash' -Value $ftpCert.GetCertHashString()
-        Set-ItemProperty "IIS:\Sites\$SiteName" -Name 'ftpServer.security.ssl.serverCertStoreName' -Value 'My'
-        Set-ItemProperty "IIS:\Sites\$SiteName" -Name 'ftpServer.security.ssl.controlChannelPolicy' -Value 'SslAllow'
-        Set-ItemProperty "IIS:\Sites\$SiteName" -Name 'ftpServer.security.ssl.dataChannelPolicy' -Value 'SslAllow'
-        fn_ok 'Certificado SSL auto-firmado configurado (FTPS permitido)'
+    # Crear sitio FTP desde cero
+    New-WebFtpSite -Name "Practica7_FTP" -Port 21 -PhysicalPath $Root -Force | Out-Null
+
+    # Configuración básica
+    Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.userIsolation.mode" -Value 0
+    Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.authentication.anonymousAuthentication.enabled" -Value $true
+
+    # === USUARIO ANÓNIMO como IUSR (forma correcta con appcmd) ===
+    $appcmd = "$env:windir\System32\inetsrv\appcmd.exe"
+    if (Test-Path $appcmd) {
+        & $appcmd set config "Practica7_FTP" `
+            -section:system.applicationHost/sites/[name='Practica7_FTP'].ftpServer/security/authentication/anonymousAuthentication `
+            /userName:"IUSR" /commit:apphost 2>$null
+        
+        fn_ok "Usuario anónimo configurado como IUSR"
     } else {
-        fn_info 'No se pudo crear certificado SSL -> FTP seguira permitido sin requerir TLS'
+        fn_err "No se encontró appcmd.exe"
     }
 
-    # Firewall
-    if (-not (Get-NetFirewallRule -DisplayName 'Practica7 FTP Control 21' -ErrorAction SilentlyContinue)) {
-        New-NetFirewallRule -DisplayName 'Practica7 FTP Control 21' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 21 | Out-Null
-    }
-    if (-not (Get-NetFirewallRule -DisplayName 'Practica7 FTP Passive 50000-50050' -ErrorAction SilentlyContinue)) {
-        New-NetFirewallRule -DisplayName 'Practica7 FTP Passive 50000-50050' -Direction Inbound -Action Allow -Protocol TCP -LocalPort "$PassiveLow-$PassiveHigh" | Out-Null
+    # === PERMISOS NTFS (la parte crítica para evitar "home directory inaccessible") ===
+    fn_info "Aplicando permisos NTFS correctos para IUSR..."
+
+    icacls $Root /inheritance:r /T /C /Q | Out-Null
+    icacls $Root /grant "Everyone:(OI)(CI)F"        /T /C /Q | Out-Null
+    icacls $Root /grant "IUSR:(OI)(CI)F"            /T /C /Q | Out-Null
+    icacls $Root /grant "IIS_IUSRS:(OI)(CI)F"       /T /C /Q | Out-Null
+    icacls $Root /grant "ANONYMOUS LOGON:(OI)(CI)F" /T /C /Q | Out-Null
+    icacls $Root /grant "NETWORK SERVICE:(OI)(CI)F" /T /C /Q | Out-Null
+
+    # Permiso explícito FullControl
+    $acl = Get-Acl $Root
+    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule("IUSR", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
+    $acl.SetAccessRule($rule)
+    Set-Acl -Path $Root -AclObject $acl
+
+    # Lo mismo para la carpeta pub
+    if (Test-Path "$Root\pub") {
+        icacls "$Root\pub" /grant "IUSR:(OI)(CI)F" /T /C /Q | Out-Null
     }
 
+    # === SSL (FTPS) ===
+    $ftpCert = New-SelfSignedCertificate -DnsName "windows.ftp.local" `
+        -CertStoreLocation "cert:\LocalMachine\My" -ErrorAction SilentlyContinue
+
+    if ($ftpCert) {
+        Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.serverCertHash"       -Value $ftpCert.GetCertHashString()
+        Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.serverCertStoreName"  -Value "My"
+        Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.controlChannelPolicy" -Value "SslAllow"
+        Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.dataChannelPolicy"    -Value "SslAllow"
+        fn_ok "Certificado SSL auto-firmado configurado (FTPS permitido)"
+    } else {
+        fn_info "No se pudo crear certificado SSL → FTP en modo plano"
+    }
+
+    # === Reglas de autorización ===
+    if (Test-Path $appcmd) {
+        & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authorization /clear /commit:apphost 2>$null
+        & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authorization /+"[accessType='Allow',users='?',permissions='Read']" /commit:apphost 2>$null
+        & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authorization /+"[accessType='Allow',users='*',permissions='Read,Write']" /commit:apphost 2>$null
+    }
+
+    # Iniciar servicios
     Start-Service ftpsvc -ErrorAction SilentlyContinue
-    Start-WebSite -Name $SiteName -ErrorAction SilentlyContinue
+    Start-WebSite -Name "Practica7_FTP" -ErrorAction SilentlyContinue
 
-    fn_ok 'FTP reiniciado correctamente.'
+    fn_ok "FTP reiniciado correctamente."
 
-    fn_info 'Descargando instaladores oficiales a las carpetas FTP...'
+    # Descarga de instaladores (sin cambios importantes)
+    fn_info "Descargando instaladores oficiales a las carpetas FTP..."
     try {
         if (-not (Test-Path "$Repo\apache\httpd.zip")) {
-            Invoke-WebRequest 'https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.62-win64-VS17.zip' -UserAgent $Global:USER_AGENT -OutFile "$Repo\apache\httpd.zip" -ErrorAction Stop
+            Invoke-WebRequest "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.62-win64-VS17.zip" -UserAgent $Global:USER_AGENT -OutFile "$Repo\apache\httpd.zip" -ErrorAction SilentlyContinue
         }
         if (-not (Test-Path "$Repo\nginx\nginx.zip")) {
-            Invoke-WebRequest 'https://nginx.org/download/nginx-1.26.2.zip' -UserAgent $Global:USER_AGENT -OutFile "$Repo\nginx\nginx.zip" -ErrorAction Stop
+            Invoke-WebRequest "https://nginx.org/download/nginx-1.26.2.zip" -UserAgent $Global:USER_AGENT -OutFile "$Repo\nginx\nginx.zip" -ErrorAction SilentlyContinue
         }
         if (-not (Test-Path "$Repo\iis\iis_web.zip")) {
-            Set-Content -Path "$env:TEMP\dummy_iis.txt" -Value 'Dummy IIS'
+            Set-Content -Path "$env:TEMP\dummy_iis.txt" -Value "Dummy IIS"
             Compress-Archive -Path "$env:TEMP\dummy_iis.txt" -DestinationPath "$Repo\iis\iis_web.zip" -Force
         }
-        fn_ok 'Instaladores descargados correctamente.'
+        fn_ok "Instaladores descargados correctamente."
     } catch {
-        fn_err "Error al descargar algunos archivos (verifica internet). $($_.Exception.Message)"
+        fn_err "Error al descargar algunos archivos (verifica internet)."
     }
 
-    Write-Host ''
-    Write-Host 'Prueba en FileZilla con:' -ForegroundColor Cyan
-    Write-Host '  Host: <IP_DEL_SERVER>' -ForegroundColor White
-    Write-Host '  Puerto: 21' -ForegroundColor White
-    Write-Host '  Usuario: anonymous' -ForegroundColor White
-    Write-Host '  Contrasena: cualquier correo o texto' -ForegroundColor White
-    Write-Host '  Cifrado: FTP explicito sobre TLS si esta disponible' -ForegroundColor White
-    Write-Host '  Ruta esperada: /pub/windows/' -ForegroundColor White
-
-    Read-Host 'Presiona ENTER para continuar'
+    Read-Host "Presiona ENTER para continuar"
 }
 
 function fn_generar_certificado_ssl {
@@ -164,8 +150,10 @@ function fn_generar_certificado_ssl {
     $openssl = $null
     $candidatos = @(
         "C:\Apache24\bin\openssl.exe",
+        "C:\nginx\openssl.exe",
         "C:\ssl\openssl.exe",
-        "$env:TEMP\tmp_ap\Apache24\bin\openssl.exe"
+        "C:\Program Files\Git\mingw64\bin\openssl.exe",
+        "C:\Program Files\Git\usr\bin\openssl.exe"
     )
 
     foreach ($c in $candidatos) {
@@ -269,6 +257,10 @@ function fn_iis_install {
     Set-Content "C:\inetpub\wwwroot\index.html" $HTML -Force
     Remove-Item "C:\inetpub\wwwroot\iisstart.htm" -ErrorAction SilentlyContinue
     Restart-Service W3SVC
+
+    if (-not (Get-NetFirewallRule -DisplayName "Practica7 IIS $Puerto" -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -DisplayName "Practica7 IIS $Puerto" -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Puerto | Out-Null
+    }
     fn_ok "IIS iniciado y funcionando en puerto $Puerto."
 }
 
@@ -299,19 +291,14 @@ function fn_apache_install {
         if ($zipLocal) {
             fn_ok "Apache encontrado en: $zipLocal"
             Copy-Item $zipLocal $destZip -Force
-        }
-        else {
+        } else {
             fn_err "No hay Apache en FTP/local."
             return
         }
-    }
-    else {
+    } else {
         fn_info "Descargando Apache desde WEB..."
         try {
-            Invoke-WebRequest "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.62-win64-VS17.zip" `
-                -UserAgent $Global:USER_AGENT `
-                -OutFile $destZip `
-                -ErrorAction Stop
+            Invoke-WebRequest "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.62-win64-VS17.zip" -UserAgent $Global:USER_AGENT -OutFile $destZip -ErrorAction Stop
         } catch {
             fn_err "No se pudo descargar Apache desde internet: $($_.Exception.Message)"
             return
@@ -346,17 +333,26 @@ function fn_apache_install {
 
     $contenido = Get-Content $conf -Raw
 
-    # ServerName y Listen base
-    $contenido = $contenido -replace '(?m)^Listen\s+\d+', "Listen $Puerto"
-    $contenido = $contenido -replace '(?m)^#ServerName\s+www\.example\.com:80', "ServerName $($script:DOMINIO):$Puerto"
-    $contenido = $contenido -replace '(?m)^ServerName\s+localhost:80', "ServerName $($script:DOMINIO):$Puerto"
+    # Siempre limpiar cualquier bloque previo generado por el script
+    $contenido = [regex]::Replace($contenido, '(?s)# BEGIN_PRACTICA7_SSL_APACHE.*?# END_PRACTICA7_SSL_APACHE', '')
 
-    # Activar modulos SSL
+    # Restaurar lineas base para evitar listeners duplicados cuando SSL cambia de puerto
+    $contenido = [regex]::Replace($contenido, '(?m)^Listen\s+\d+\s*$', 'Listen 80', 1)
+    $contenido = $contenido -replace '(?m)^ServerName\s+.+$', 'ServerName localhost:80'
+    $contenido = $contenido -replace '(?m)^#ServerName\s+www\.example\.com:80', 'ServerName localhost:80'
+
+    # Activar modulos SSL solo una vez
     $contenido = $contenido -replace '(?m)^\s*#\s*LoadModule\s+ssl_module\s+modules/mod_ssl\.so', 'LoadModule ssl_module modules/mod_ssl.so'
     $contenido = $contenido -replace '(?m)^\s*#\s*LoadModule\s+socache_shmcb_module\s+modules/mod_socache_shmcb\.so', 'LoadModule socache_shmcb_module modules/mod_socache_shmcb.so'
 
-    # Limpiar bloque generado previamente por el script
-    $contenido = [regex]::Replace($contenido, '(?s)# BEGIN_PRACTICA7_SSL_APACHE.*?# END_PRACTICA7_SSL_APACHE', '')
+    if ($SSL -eq "s") {
+        # Mantener puerto 80 base y agregar listener SSL dedicado
+        $contenido = $contenido -replace '(?m)^ServerName\s+localhost:80', "ServerName $($script:DOMINIO):80"
+    } else {
+        # HTTP puro: mover listener principal al puerto elegido
+        $contenido = [regex]::Replace($contenido, '(?m)^Listen\s+80\s*$', "Listen $Puerto", 1)
+        $contenido = $contenido -replace '(?m)^ServerName\s+localhost:80', "ServerName $($script:DOMINIO):$Puerto"
+    }
 
     Set-Content $conf $contenido
 
@@ -380,7 +376,6 @@ Listen $Puerto
 </VirtualHost>
 # END_PRACTICA7_SSL_APACHE
 "@
-
             Add-Content $conf $sslBlock
         } else {
             fn_err "No se pudo configurar SSL. Apache seguira sin SSL."
@@ -413,7 +408,6 @@ Listen $Puerto
 
     $test = & "C:\Apache24\bin\httpd.exe" -t 2>&1
     $testText = ($test | Out-String)
-
     if ($LASTEXITCODE -ne 0 -or $testText -notmatch "Syntax OK") {
         fn_err "La configuracion de Apache no es valida."
         $test
@@ -433,9 +427,9 @@ Listen $Puerto
     if ($svc -and $svc.Status -eq 'Running') {
         fn_ok "Apache levantado correctamente en el puerto $Puerto."
         if ($SSL -eq "s") {
-            Write-Host "URL: https://$env:COMPUTERNAME`:$Puerto" -ForegroundColor Green
+            Write-Host "URL: https://<IP_DEL_SERVER>:$Puerto" -ForegroundColor Green
         } else {
-            Write-Host "URL: http://$env:COMPUTERNAME`:$Puerto" -ForegroundColor Green
+            Write-Host "URL: http://<IP_DEL_SERVER>:$Puerto" -ForegroundColor Green
         }
     } else {
         fn_err "Apache no inicio correctamente."
@@ -452,7 +446,7 @@ function fn_nginx_install {
     $destZip = "$env:TEMP\nginx.zip"
     if ($Origen -eq "ftp") {
         fn_info "Descargando desde FTP 127.0.0.1..."
-        try { Invoke-WebRequest "ftp://localhost/pub/windows/nginx/nginx.zip" -OutFile $destZip } catch { fn_err "No hay Nginx en FTP." }
+        try { Invoke-WebRequest "ftp://localhost/pub/windows/nginx/nginx.zip" -OutFile $destZip } catch { fn_err "No hay Nginx en FTP."; return }
     } else {
         fn_info "Descargando de internet WEB..."
         Invoke-WebRequest "https://nginx.org/download/nginx-1.26.2.zip" -OutFile $destZip
@@ -468,13 +462,15 @@ function fn_nginx_install {
     $SSL_ON = ""
     $SSL_CERTS = ""
     if ($SSL -eq "s") {
-        fn_generar_certificado_ssl "nginx"
-        $SSL_DIR = "C:/ssl/nginx"
-        $SSL_ON = "ssl"
-        $SSL_CERTS = @"
+        $okSSL = fn_generar_certificado_ssl "nginx"
+        if ($okSSL) {
+            $SSL_DIR = "C:/ssl/nginx"
+            $SSL_ON = "ssl"
+            $SSL_CERTS = @"
         ssl_certificate     $SSL_DIR/server.crt;
         ssl_certificate_key $SSL_DIR/server.key;
 "@
+        }
     }
 
     $c = @"
@@ -504,6 +500,10 @@ http {
 </html>
 "@
     Set-Content "C:\nginx\html\index.html" $HTML -Force
+
+    if (-not (Get-NetFirewallRule -DisplayName "Practica7 Nginx $Puerto" -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -DisplayName "Practica7 Nginx $Puerto" -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Puerto | Out-Null
+    }
 
     Start-Process "C:\nginx\nginx.exe" -WorkingDirectory "C:\nginx" -WindowStyle Hidden
     fn_ok "Nginx operando silenciosamente en puerto $Puerto."
