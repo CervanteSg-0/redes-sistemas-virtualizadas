@@ -439,74 +439,185 @@ Listen $Puerto
 
 function fn_nginx_install {
     param($Origen, $Puerto, $SSL)
+
     fn_info "Limpiando procesos de Nginx anteriores..."
-    Stop-Service Nginx -Force -ErrorAction SilentlyContinue
+    Stop-Service nginx -Force -ErrorAction SilentlyContinue
     Get-Process nginx -ErrorAction SilentlyContinue | Stop-Process -Force
+    sc.exe delete nginx 2>$null | Out-Null
 
     $destZip = "$env:TEMP\nginx.zip"
-    if ($Origen -eq "ftp") {
-        fn_info "Descargando desde FTP 127.0.0.1..."
-        try { Invoke-WebRequest "ftp://localhost/pub/windows/nginx/nginx.zip" -OutFile $destZip } catch { fn_err "No hay Nginx en FTP."; return }
-    } else {
-        fn_info "Descargando de internet WEB..."
-        Invoke-WebRequest "https://nginx.org/download/nginx-1.26.2.zip" -OutFile $destZip
-    }
-
-    fn_info "Descomprimiendo en C:\nginx..."
+    Remove-Item $destZip -Force -ErrorAction SilentlyContinue
     Remove-Item -Recurse -Force "C:\nginx" -ErrorAction SilentlyContinue
-    Expand-Archive $destZip -DestinationPath "C:\" -Force
-    Rename-Item "C:\nginx-1.26.2" "nginx" -ErrorAction SilentlyContinue
 
-    $conf = "C:\nginx\conf\nginx.conf"
-    
-    $SSL_ON = ""
-    $SSL_CERTS = ""
-    if ($SSL -eq "s") {
-        $okSSL = fn_generar_certificado_ssl "nginx"
-        if ($okSSL) {
-            $SSL_DIR = "C:/ssl/nginx"
-            $SSL_ON = "ssl"
-            $SSL_CERTS = @"
-        ssl_certificate     $SSL_DIR/server.crt;
-        ssl_certificate_key $SSL_DIR/server.key;
-"@
+    if ($Origen -eq "ftp") {
+        fn_info "Buscando Nginx en repositorio FTP/local..."
+
+        $candidatos = @(
+            "C:\Practica7_FTP\LocalUser\Public\pub\windows\nginx\nginx.zip",
+            "C:\Practica7_FTP\pub\windows\nginx\nginx.zip",
+            "C:\inetpub\ftproot\LocalUser\Public\pub\windows\nginx\nginx.zip",
+            "C:\inetpub\ftproot\pub\windows\nginx\nginx.zip"
+        )
+
+        $zipLocal = $candidatos | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+        if ($zipLocal) {
+            fn_ok "Nginx encontrado en: $zipLocal"
+            Copy-Item $zipLocal $destZip -Force
+        }
+        else {
+            fn_err "No hay Nginx en FTP/local."
+            return
+        }
+    }
+    else {
+        fn_info "Descargando Nginx desde WEB..."
+        try {
+            Invoke-WebRequest "https://nginx.org/download/nginx-1.26.2.zip" `
+                -UserAgent $Global:USER_AGENT `
+                -OutFile $destZip `
+                -ErrorAction Stop
+        } catch {
+            fn_err "No se pudo descargar Nginx desde internet: $($_.Exception.Message)"
+            return
         }
     }
 
-    $c = @"
-events { worker_connections 1024; }
-http {
-    include mime.types;
-    server {
-        listen $Puerto $SSL_ON;
-        server_name $script:DOMINIO;
-        $SSL_CERTS
-        root html;
-        index index.html;
+    if (-not (Test-Path $destZip)) {
+        fn_err "No existe el archivo $destZip. Se cancela la instalacion."
+        return
     }
-}
-"@
-    Set-Content $conf $c -Force
 
-    $HTML = @"
+    fn_info "Descomprimiendo Nginx en C:\ ..."
+    try {
+        Expand-Archive $destZip -DestinationPath "C:\" -Force -ErrorAction Stop
+    } catch {
+        fn_err "Fallo al descomprimir Nginx: $($_.Exception.Message)"
+        return
+    }
+
+    $extraida = Get-ChildItem "C:\" -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "nginx-*" } | Select-Object -First 1
+    if ($extraida) {
+        if (Test-Path "C:\nginx") { Remove-Item "C:\nginx" -Recurse -Force -ErrorAction SilentlyContinue }
+        Rename-Item $extraida.FullName "C:\nginx" -Force
+    }
+
+    if (-not (Test-Path "C:\nginx\conf\nginx.conf")) {
+        fn_err "No se encontro C:\nginx\conf\nginx.conf."
+        return
+    }
+
+    $conf = "C:\nginx\conf\nginx.conf"
+    $sslDir = "C:/ssl/nginx"
+    New-Item -ItemType Directory -Path "C:\ssl\nginx" -Force | Out-Null
+
+    $html = @"
 <!DOCTYPE html>
 <html>
-<body style="background:#1a1a2e;color:white;text-align:center;padding-top:100px;font-family:sans-serif;">
-    <h1 style="color:#e94560;">Nginx Windows</h1>
-    <p>Servidor activo en puerto $Puerto</p>
-    <p>Dominio: $script:DOMINIO | SSL: $SSL</p>
-    <p>Instalado desde $Origen</p>
+<body style='background:#111;color:#fff;text-align:center;padding-top:100px;font-family:sans-serif;'>
+<h1 style='color:#00d1b2;'>Nginx Windows</h1>
+<p>Servidor activo en puerto $Puerto</p>
+<p>Dominio: $script:DOMINIO | SSL: $SSL</p>
+<p>Instalado desde $Origen</p>
 </body>
 </html>
 "@
-    Set-Content "C:\nginx\html\index.html" $HTML -Force
+    Set-Content "C:\nginx\html\index.html" $html -Force
+
+    if ($SSL -eq "s") {
+        $okSSL = fn_generar_certificado_ssl "nginx"
+        if (-not $okSSL) {
+            fn_err "No se pudo configurar SSL para Nginx."
+            return
+        }
+
+        $nginxConf = @"
+worker_processes  1;
+
+events {
+    worker_connections  1024;
+}
+
+http {
+    include       mime.types;
+    default_type  application/octet-stream;
+    sendfile        on;
+    keepalive_timeout  65;
+
+    server {
+        listen       $Puerto ssl;
+        server_name  $script:DOMINIO;
+
+        ssl_certificate      $sslDir/server.crt;
+        ssl_certificate_key  $sslDir/server.key;
+
+        location / {
+            root   html;
+            index  index.html index.htm;
+        }
+    }
+}
+"@
+    }
+    else {
+        $nginxConf = @"
+worker_processes  1;
+
+events {
+    worker_connections  1024;
+}
+
+http {
+    include       mime.types;
+    default_type  application/octet-stream;
+    sendfile        on;
+    keepalive_timeout  65;
+
+    server {
+        listen       $Puerto;
+        server_name  $script:DOMINIO;
+
+        location / {
+            root   html;
+            index  index.html index.htm;
+        }
+    }
+}
+"@
+    }
+
+    Set-Content $conf $nginxConf -Force
+
+    if (-not (Test-Path "C:\nginx\nginx.exe")) {
+        fn_err "No existe C:\nginx\nginx.exe."
+        return
+    }
+
+    $test = & "C:\nginx\nginx.exe" -t 2>&1
+    $testText = ($test | Out-String)
+    if ($LASTEXITCODE -ne 0 -or $testText -notmatch "successful|syntax is ok") {
+        fn_err "La configuracion de Nginx no es valida."
+        $test
+        return
+    }
+
+    New-Service -Name "nginx" -BinaryPathName "`"C:\nginx\nginx.exe`"" -DisplayName "nginx" -StartupType Automatic -ErrorAction SilentlyContinue | Out-Null
+    Start-Service nginx -ErrorAction SilentlyContinue
 
     if (-not (Get-NetFirewallRule -DisplayName "Practica7 Nginx $Puerto" -ErrorAction SilentlyContinue)) {
         New-NetFirewallRule -DisplayName "Practica7 Nginx $Puerto" -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Puerto | Out-Null
     }
 
-    Start-Process "C:\nginx\nginx.exe" -WorkingDirectory "C:\nginx" -WindowStyle Hidden
-    fn_ok "Nginx operando silenciosamente en puerto $Puerto."
+    Start-Sleep -Seconds 2
+    $svc = Get-Service nginx -ErrorAction SilentlyContinue
+    if ($svc) { $svc.Refresh() }
+
+    if ($svc -and $svc.Status -eq 'Running') {
+        fn_ok "Nginx levantado correctamente en el puerto $Puerto."
+    } else {
+        fn_err "Nginx no inicio correctamente."
+        Get-Content "C:\nginx\logs\error.log" -Tail 30 -ErrorAction SilentlyContinue
+    }
 }
 
 function fn_estado_servicios {
