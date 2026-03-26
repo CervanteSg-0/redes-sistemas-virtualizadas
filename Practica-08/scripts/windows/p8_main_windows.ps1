@@ -19,10 +19,12 @@ function fn_menu {
     echo ""
 }
 
-while ($true) {
+$Running = $true
+while ($Running) {
     fn_menu
     $op = Read-Host "Elige una opcion"
-    
+    $pausa = $true
+
     switch ($op) {
         "1" { fn_install_features }
         "2" { if (fn_check_dc) { fn_setup_ad_structure } }
@@ -41,10 +43,17 @@ while ($true) {
             fn_setup_applocker
             fn_ok "Proceso completo finalizado."
         }
-        "8" { break }
+        "8" { 
+            $Running = $false
+            $pausa = $false
+            fn_ok "Saliendo del programa..."
+        }
         default { fn_err "Opcion no valida." }
     }
-    echo ""
-    Read-Host "Presiona ENTER para continuar"
-    fn_show_header
+
+    if ($pausa) {
+        echo ""
+        Read-Host "Presiona ENTER para continuar"
+        fn_show_header
+    }
 }
