@@ -496,9 +496,14 @@ function fn_nginx_install {
         return
     }
 
-    $extraida = Get-ChildItem "C:\" -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "nginx-*" } | Select-Object -First 1
+    $extraida = Get-ChildItem "C:\" -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like "nginx-*" } |
+        Select-Object -First 1
+
     if ($extraida) {
-        if (Test-Path "C:\nginx") { Remove-Item "C:\nginx" -Recurse -Force -ErrorAction SilentlyContinue }
+        if (Test-Path "C:\nginx") {
+            Remove-Item "C:\nginx" -Recurse -Force -ErrorAction SilentlyContinue
+        }
         Rename-Item $extraida.FullName "C:\nginx" -Force
     }
 
@@ -507,9 +512,11 @@ function fn_nginx_install {
         return
     }
 
+    New-Item -ItemType Directory -Path "C:\nginx\logs" -Force | Out-Null
+    New-Item -ItemType Directory -Path "C:\ssl\nginx" -Force | Out-Null
+
     $conf = "C:\nginx\conf\nginx.conf"
     $sslDir = "C:/ssl/nginx"
-    New-Item -ItemType Directory -Path "C:\ssl\nginx" -Force | Out-Null
 
     $html = @"
 <!DOCTYPE html>
@@ -593,15 +600,21 @@ http {
         return
     }
 
-    $test = & "C:\nginx\nginx.exe" -t 2>&1
+    $test = & "C:\nginx\nginx.exe" -p "C:\nginx\" -c "conf\nginx.conf" -t 2>&1
     $testText = ($test | Out-String)
+
     if ($LASTEXITCODE -ne 0 -or $testText -notmatch "successful|syntax is ok") {
         fn_err "La configuracion de Nginx no es valida."
         $test
         return
     }
 
-    New-Service -Name "nginx" -BinaryPathName "`"C:\nginx\nginx.exe`"" -DisplayName "nginx" -StartupType Automatic -ErrorAction SilentlyContinue | Out-Null
+    New-Service -Name "nginx" `
+        -BinaryPathName "`"C:\nginx\nginx.exe`" -p `"C:\nginx\`" -c `"conf\nginx.conf`"" `
+        -DisplayName "nginx" `
+        -StartupType Automatic `
+        -ErrorAction SilentlyContinue | Out-Null
+
     Start-Service nginx -ErrorAction SilentlyContinue
 
     if (-not (Get-NetFirewallRule -DisplayName "Practica7 Nginx $Puerto" -ErrorAction SilentlyContinue)) {
