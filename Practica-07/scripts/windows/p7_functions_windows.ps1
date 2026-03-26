@@ -301,14 +301,8 @@ function fn_apache_install {
             Copy-Item $zipLocal $destZip -Force
         }
         else {
-            fn_info "No se encontro por ruta local. Intentando por FTP..."
-            try {
-                Invoke-WebRequest "ftp://127.0.0.1/pub/windows/apache/httpd.zip" -OutFile $destZip -ErrorAction Stop
-            } catch {
-                fn_err "No hay Apache en FTP."
-                Read-Host "Presiona ENTER para continuar"
-                return
-            }
+            fn_err "No hay Apache en FTP/local."
+            return
         }
     }
     else {
@@ -320,14 +314,12 @@ function fn_apache_install {
                 -ErrorAction Stop
         } catch {
             fn_err "No se pudo descargar Apache desde internet: $($_.Exception.Message)"
-            Read-Host "Presiona ENTER para continuar"
             return
         }
     }
 
     if (-not (Test-Path $destZip)) {
         fn_err "No existe el archivo $destZip. Se cancela la instalacion."
-        Read-Host "Presiona ENTER para continuar"
         return
     }
 
@@ -336,7 +328,6 @@ function fn_apache_install {
         Expand-Archive $destZip -DestinationPath "C:\" -Force -ErrorAction Stop
     } catch {
         fn_err "Fallo al descomprimir Apache: $($_.Exception.Message)"
-        Read-Host "Presiona ENTER para continuar"
         return
     }
 
@@ -347,43 +338,52 @@ function fn_apache_install {
         }
     }
 
-    if (-not (Test-Path "C:\Apache24\conf\httpd.conf")) {
-        fn_err "No se encontro C:\Apache24\conf\httpd.conf despues de extraer Apache."
-        Read-Host "Presiona ENTER para continuar"
+    $conf = "C:\Apache24\conf\httpd.conf"
+    if (-not (Test-Path $conf)) {
+        fn_err "No se encontro $conf."
         return
     }
 
-    $conf = "C:\Apache24\conf\httpd.conf"
+    $contenido = Get-Content $conf -Raw
 
-    (Get-Content $conf) -replace '^Listen\s+\d+', "Listen $Puerto" | Set-Content $conf
-    (Get-Content $conf) -replace '#ServerName www.example.com:80', "ServerName $($script:DOMINIO):$Puerto" | Set-Content $conf
-    (Get-Content $conf) -replace '^ServerName\s+localhost:80', "ServerName $($script:DOMINIO):$Puerto" | Set-Content $conf
+    # ServerName y Listen base
+    $contenido = $contenido -replace '(?m)^Listen\s+\d+', "Listen $Puerto"
+    $contenido = $contenido -replace '(?m)^#ServerName\s+www\.example\.com:80', "ServerName $($script:DOMINIO):$Puerto"
+    $contenido = $contenido -replace '(?m)^ServerName\s+localhost:80', "ServerName $($script:DOMINIO):$Puerto"
+
+    # Activar modulos SSL
+    $contenido = $contenido -replace '(?m)^\s*#\s*LoadModule\s+ssl_module\s+modules/mod_ssl\.so', 'LoadModule ssl_module modules/mod_ssl.so'
+    $contenido = $contenido -replace '(?m)^\s*#\s*LoadModule\s+socache_shmcb_module\s+modules/mod_socache_shmcb\.so', 'LoadModule socache_shmcb_module modules/mod_socache_shmcb.so'
+
+    # Limpiar bloque generado previamente por el script
+    $contenido = [regex]::Replace($contenido, '(?s)# BEGIN_PRACTICA7_SSL_APACHE.*?# END_PRACTICA7_SSL_APACHE', '')
+
+    Set-Content $conf $contenido
 
     $SSL_DIR = "C:/ssl/apache"
     if ($SSL -eq "s") {
         fn_info "Preparando SSL para Apache..."
-        fn_generar_certificado_ssl "apache"
+        $okSSL = fn_generar_certificado_ssl "apache"
 
-        if ((Test-Path "$SSL_DIR/server.crt") -and (Test-Path "$SSL_DIR/server.key")) {
+        if ($okSSL) {
             $sslBlock = @"
 
-LoadModule ssl_module modules/mod_ssl.so
-LoadModule socache_shmcb_module modules/mod_socache_shmcb.so
-Include conf/extra/httpd-ssl.conf
+# BEGIN_PRACTICA7_SSL_APACHE
+Listen $Puerto
 
 <VirtualHost *:$Puerto>
-    ServerName $script:DOMINIO
+    ServerName $($script:DOMINIO):$Puerto
     DocumentRoot "C:/Apache24/htdocs"
     SSLEngine on
     SSLCertificateFile "$SSL_DIR/server.crt"
     SSLCertificateKeyFile "$SSL_DIR/server.key"
 </VirtualHost>
+# END_PRACTICA7_SSL_APACHE
 "@
 
             Add-Content $conf $sslBlock
-        }
-        else {
-            fn_err "No se encontraron los archivos del certificado SSL. Apache seguira sin SSL."
+        } else {
+            fn_err "No se pudo configurar SSL. Apache seguira sin SSL."
         }
     }
 
@@ -405,12 +405,21 @@ Include conf/extra/httpd-ssl.conf
     Set-Content "C:\Apache24\htdocs\index.html" $HTML -Force
 
     if (-not (Test-Path "C:\Apache24\bin\httpd.exe")) {
-        fn_err "No existe C:\Apache24\bin\httpd.exe. La instalacion de Apache quedo incompleta."
-        Read-Host "Presiona ENTER para continuar"
+        fn_err "No existe C:\Apache24\bin\httpd.exe."
         return
     }
 
     & "C:\Apache24\bin\httpd.exe" -k install -n Apache24 | Out-Null
+
+    $test = & "C:\Apache24\bin\httpd.exe" -t 2>&1
+    $testText = ($test | Out-String)
+
+    if ($LASTEXITCODE -ne 0 -or $testText -notmatch "Syntax OK") {
+        fn_err "La configuracion de Apache no es valida."
+        $test
+        return
+    }
+
     Start-Service Apache24 -ErrorAction SilentlyContinue
 
     if (-not (Get-NetFirewallRule -DisplayName "Practica7 Apache $Puerto" -ErrorAction SilentlyContinue)) {
@@ -418,12 +427,19 @@ Include conf/extra/httpd-ssl.conf
     }
 
     Start-Sleep -Seconds 2
-
     $svc = Get-Service Apache24 -ErrorAction SilentlyContinue
+    if ($svc) { $svc.Refresh() }
+
     if ($svc -and $svc.Status -eq 'Running') {
         fn_ok "Apache levantado correctamente en el puerto $Puerto."
+        if ($SSL -eq "s") {
+            Write-Host "URL: https://$env:COMPUTERNAME`:$Puerto" -ForegroundColor Green
+        } else {
+            Write-Host "URL: http://$env:COMPUTERNAME`:$Puerto" -ForegroundColor Green
+        }
     } else {
         fn_err "Apache no inicio correctamente."
+        Get-Content "C:\Apache24\logs\error.log" -Tail 30 -ErrorAction SilentlyContinue
     }
 }
 
