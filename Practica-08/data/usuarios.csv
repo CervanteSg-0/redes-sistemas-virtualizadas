@@ -1,11 +1,11 @@
-Name,Username,Password,Department
-Alfredo Acosta,alfredo.acosta,Contrasena123!,Sistemas
-Lucia Mendez,lucia.mendez,Contrasena123!,Sistemas
-Carlos Perez,carlos.perez,Contrasena123!,Contabilidad
-Diana Ruiz,diana.ruiz,Contrasena123!,Contabilidad
-Elena Sosa,elena.sosa,Contrasena123!,Sistemas
-Fernando Gomez,fernando.gomez,Contrasena123!,Contabilidad
-Gloria Cano,gloria.cano,Contrasena123!,Sistemas
-Humberto Leon,humberto.leon,Contrasena123!,Contabilidad
-Irene Diaz,irene.diaz,Contrasena123!,Sistemas
-Jorge Nava,jorge.nava,Contrasena123!,Contabilidad
+Nombre,Username,Password,Tipo
+Alfredo Acosta,alfredo.acosta,Contrasena123!,Cuates
+Lucia Mendez,lucia.mendez,Contrasena123!,Cuates
+Carlos Perez,carlos.perez,Contrasena123!,NoCuates
+Diana Ruiz,diana.ruiz,Contrasena123!,NoCuates
+Elena Sosa,elena.sosa,Contrasena123!,Cuates
+Fernando Gomez,fernando.gomez,Contrasena123!,NoCuates
+Gloria Cano,gloria.cano,Contrasena123!,Cuates
+Humberto Leon,humberto.leon,Contrasena123!,NoCuates
+Irene Diaz,irene.diaz,Contrasena123!,Cuates
+Jorge Nava,jorge.nava,Contrasena123!,NoCuates

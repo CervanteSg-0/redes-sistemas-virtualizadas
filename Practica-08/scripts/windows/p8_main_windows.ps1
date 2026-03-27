@@ -14,8 +14,9 @@ function fn_menu {
     Write-Host "4. Configurar GPO Logon Hours y Cierre de Sesion" -ForegroundColor Cyan
     Write-Host "5. Configurar FSRM (Cuotas y Filtros de Archivos)" -ForegroundColor Cyan
     Write-Host "6. Configurar AppLocker (Reglas de Hash)" -ForegroundColor Cyan
-    Write-Host "7. Ejecutar TODO automaticamente" -ForegroundColor Yellow
-    Write-Host "8. Salir" -ForegroundColor Red
+    Write-Host "7. VERIFICAR Practica (Cuotas, Filtros, Horarios)" -ForegroundColor Green
+    Write-Host "8. Ejecutar TODO automaticamente" -ForegroundColor Yellow
+    Write-Host "9. Salir" -ForegroundColor Red
     echo ""
 }
 
@@ -32,7 +33,8 @@ while ($Running) {
         "4" { if (fn_check_dc) { fn_setup_logon_gpo } }
         "5" { fn_setup_fsrm }
         "6" { fn_setup_applocker }
-        "7" { 
+        "7" { if (fn_check_dc) { fn_verificar_p8 } }
+        "8" { 
             fn_install_features
             if (fn_check_dc) {
                 fn_setup_ad_structure
@@ -43,7 +45,7 @@ while ($Running) {
             fn_setup_applocker
             fn_ok "Proceso completo finalizado."
         }
-        "8" { 
+        "9" { 
             $Running = $false
             $pausa = $false
             fn_ok "Saliendo del programa..."
@@ -57,3 +59,4 @@ while ($Running) {
         fn_show_header
     }
 }
+ 
